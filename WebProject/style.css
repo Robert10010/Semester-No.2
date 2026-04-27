@@ -1,0 +1,174 @@
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    background: linear-gradient(135deg, #0f172a, #1e293b);
+    font-family: 'Roboto', sans-serif;
+    color: #e2e8f0;
+    overflow: hidden;
+    user-select: none;
+}
+
+/* Telefon 外殼 */
+.phone-container {
+    width: 340px;
+    background: rgba(30, 41, 59, 0.7);
+    backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 40px;
+    padding: 30px 25px;
+    box-shadow: 
+        0 25px 50px -12px rgba(0, 0, 0, 0.6),
+        inset 0 1px 1px rgba(255, 255, 255, 0.2);
+    display: flex;
+    flex-direction: column;
+    gap: 25px;
+}
+
+/* 顯示螢幕 */
+.screen {
+    background: #000;
+    border-radius: 15px;
+    padding: 20px;
+    height: 100px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    box-shadow: inset 0 0 15px rgba(16, 185, 129, 0.1);
+    border: 1px solid #334155;
+    position: relative;
+    overflow: hidden;
+}
+
+/* 螢幕掃描線效果 (增強復古科幻感) */
+.screen::after {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: linear-gradient(
+        rgba(18, 16, 16, 0) 50%,
+        rgba(0, 0, 0, 0.25) 50%
+    );
+    background-size: 100% 4px;
+    pointer-events: none;
+}
+
+.display-text {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 32px;
+    color: #10b981;
+    text-shadow: 0 0 10px rgba(16, 185, 129, 0.5);
+    text-align: right;
+    letter-spacing: 2px;
+    min-height: 40px;
+}
+
+.status-indicator {
+    font-size: 12px;
+    color: #94a3b8;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.status-indicator.calling {
+    color: #3b82f6;
+    animation: pulse 1s infinite alternate;
+}
+
+/* 九宮格鍵盤 */
+.keypad {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 15px;
+}
+
+.key {
+    background: linear-gradient(145deg, #334155, #1e293b);
+    border: none;
+    border-radius: 50%;
+    aspect-ratio: 1; /* 正圓形 */
+    color: #f8fafc;
+    font-size: 28px;
+    font-weight: 700;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 
+        5px 5px 10px rgba(0,0,0,0.4),
+        -2px -2px 5px rgba(255,255,255,0.05);
+    transition: all 0.15s ease;
+    position: relative;
+}
+
+.key span {
+    font-size: 10px;
+    color: #94a3b8;
+    font-weight: 400;
+    margin-top: -2px;
+    letter-spacing: 0.5px;
+}
+
+.key:active {
+    transform: translateY(2px) scale(0.95);
+    box-shadow: 
+        inset 3px 3px 6px rgba(0,0,0,0.6),
+        inset -1px -1px 3px rgba(255,255,255,0.05);
+}
+
+/* 控制鍵 (Call & Clear) */
+.controls {
+    display: flex;
+    justify-content: space-between;
+    gap: 20px;
+    margin-top: 10px;
+}
+
+.btn {
+    flex: 1;
+    padding: 15px 0;
+    border-radius: 20px;
+    border: none;
+    font-size: 16px;
+    font-weight: bold;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    letter-spacing: 1px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+}
+
+.btn-clear {
+    background: #475569;
+    color: #f8fafc;
+}
+
+.btn-clear:active {
+    background: #334155;
+    transform: scale(0.95);
+}
+
+.btn-call {
+    background: linear-gradient(135deg, #10b981, #059669);
+    color: white;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.2);
+}
+
+.btn-call:active {
+    background: linear-gradient(135deg, #059669, #047857);
+    transform: scale(0.95);
+}
+
+/* 動畫設定 */
+@keyframes pulse {
+    from { opacity: 0.6; }
+    to { opacity: 1; text-shadow: 0 0 10px #3b82f6; }
+}
