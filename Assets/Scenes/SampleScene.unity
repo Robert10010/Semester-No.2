@@ -810,6 +810,7 @@ GameObject:
   m_Component:
   - component: {fileID: 542080666}
   - component: {fileID: 542080668}
+  - component: {fileID: 542080669}
   - component: {fileID: 542080667}
   m_Layer: 5
   m_Name: "\u5167\u5BB9"
@@ -857,7 +858,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_text: "\u6E2C\u8A66\u7528  \u963F\u5DF4\u963F\u5DF4"
+  m_text: "\u5167\u5BB9"
   m_isRightToLeft: 0
   m_fontAsset: {fileID: 11400000, guid: d2bc5d1e5f7692d4ea59b9d1597d883c, type: 2}
   m_sharedMaterial: {fileID: 6147832477309550230, guid: d2bc5d1e5f7692d4ea59b9d1597d883c, type: 2}
@@ -923,7 +924,7 @@ MonoBehaviour:
   m_VertexBufferAutoSizeReduction: 0
   m_useMaxVisibleDescender: 1
   m_pageToDisplay: 1
-  m_margin: {x: 0, y: 0, z: 0, w: 0}
+  m_margin: {x: 0, y: 0, z: -379.94257, w: -22.968853}
   m_isUsingLegacyAnimationComponent: 0
   m_isVolumetricText: 0
   m_hasFontAssetChanged: 0
@@ -937,6 +938,23 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 542080665}
   m_CullTransparentMesh: 1
+--- !u!114 &542080669
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 542080665}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e8e971b332aca17488d7d57642c361b9, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::InteractiveNovelGames.Typography.TextControl.TextControl
+  Text: "\u6E2C\u8A66\u7528  \u963F\u5DF4\u963F\u5DF4 \u751F\u5E73\u6700\u559C\u6B61\u5403\u5927\u96DE\u96DE "
+  charactersPerSecond: 20
+  interpunctuationDelay: 0.5
+  Skip: 0
+  skipSpeedUp: 5
 --- !u!1 &685203016
 GameObject:
   m_ObjectHideFlags: 0

@@ -23,6 +23,9 @@ namespace InteractiveNovelGames.Typography.TextControl
         [Header("每秒出現字數")]
         [SerializeField] private float charactersPerSecond = 20f;
         [SerializeField] private float interpunctuationDelay = 0.5f;
+        [Header("跳過設定")]
+        [SerializeField] private bool Skip;
+        [SerializeField] [Min(1)] private int skipSpeedUp = 5;
 
         void Awake()
         {
@@ -51,6 +54,12 @@ namespace InteractiveNovelGames.Typography.TextControl
         {
             TMP_TextInfo textInfo = _textBox.textInfo;
             
+            while(_currentVisibleCharacterIndex < textInfo.characterCount + 1)
+            {
+                char currentChar = textInfo.characterInfo[_currentVisibleCharacterIndex].character;
+                _textBox.maxVisibleCharacters++;
+                yield return _simpleDeleay;
+            }
         }
     }
 }
