@@ -47,16 +47,18 @@ document.getElementById('btn-clear').addEventListener('click', () => {
 
 // 撥出按鈕
 document.getElementById('btn-call').addEventListener('click', () => {
+    let numberToSend = currentNumber;
+    
+    // 如果沒有輸入任何號碼，就傳送 "NEXT" 訊號來推進劇情
     if (currentNumber === "") {
-        alert("請先輸入電話號碼！");
-        return;
+        numberToSend = "NEXT";
     }
 
     statusIndicator.innerText = "Calling...";
     statusIndicator.classList.add("calling");
     
     // 傳送訊號至 PHP
-    sendToPHP(currentNumber);
+    sendToPHP(numberToSend);
 });
 
 // 更新螢幕顯示

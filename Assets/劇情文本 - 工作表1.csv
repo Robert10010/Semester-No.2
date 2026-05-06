@@ -1,0 +1,9 @@
+Tag,NodeID,Character,EmotionTag ,Position,TextContent,NextID,EffectType,EffectTarget,IsChoice,Choice1Text,Choice1Next,Choice2Text,Choice2Next,Choice3Text,Choice3Next
+Scene1,START,媽媽,,,你也覺得這個人瘋了吧,node_01,,,,,,,,,
+Scene1,node_01,媽媽,,,對吧,node_02,,,,,,,,,
+Scene1,node_02,媽媽,,,畢竟你是我的孩子,node_03,,,,,,,,,
+Scene1,node_03,媽媽,,,你也會這麼想吧,node_04,,,,,,,,,
+Scene1,node_04,女兒,,,我到底該怎麼辦呢,,,,1,不是的，爸爸根本不是那樣想,node_05,嗯,node_06,怎麼可能阿，你不是我認識的媽媽,node_07
+Scene1,node_05,媽媽,,,怎麼可能...,,,,,,,,,,
+Scene1,node_06,媽媽,,,對吧，乖孩子，你也是這麼覺得吧,,,,,,,,,,
+Scene1,node_07,媽媽,,,什麼意思？！！連你也不願意相信我嗎,,,,,,,,,,
