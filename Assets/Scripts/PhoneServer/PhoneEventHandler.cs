@@ -14,6 +14,7 @@ public class PhoneEventHandler : MonoBehaviour
     public string targetNumberA = "0911111111";
     public string targetNumberB = "0922222222";
     public string targetNumberC = "0933333333";
+    public string targetNumberD = "0919026106";
 
     void OnEnable()
     {
@@ -47,6 +48,10 @@ public class PhoneEventHandler : MonoBehaviour
         else if (receivedNumber == targetNumberC)
         {
             ActionForNumberC();
+        }
+        else if (receivedNumber == targetNumberD)
+        {
+            ActionForNumberD();
         }
         else
         {
@@ -92,5 +97,9 @@ public class PhoneEventHandler : MonoBehaviour
             targetObjectToControl.transform.Rotate(0, 90, 0);
             Debug.Log("目標物件旋轉了 90 度！");
         }
+    }
+    private void ActionForNumberD()
+    {
+        Debug.Log($"[PhoneEventHandler] 觸發 號碼D [{targetNumberD}] 的對應事件！");
     }
 }

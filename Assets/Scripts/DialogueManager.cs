@@ -42,13 +42,22 @@ public class DialogueManager : MonoBehaviour
     void Start()
     {
         LoadCSV();
+        // 移除了這裡的 PlayNode(startNodeID);，改為等 GameFlowController 呼叫 StartGame() 時才播放
+    }
+
+    // 提供給 GameFlowController 呼叫的方法
+    public void StartGame()
+    {
         PlayNode(startNodeID);
     }
 
     void Update()
     {
+        // 如果遊戲還沒開始 (currentNode 為 null)，就不要處理任何點擊或按鍵
+        if (currentNode == null) return;
+
         // 檢查是否打字完畢需要顯示選項
-        if (currentNode != null && currentNode.IsChoice == 1 && choicePanel != null && !choicePanel.activeSelf)
+        if (currentNode.IsChoice == 1 && choicePanel != null && !choicePanel.activeSelf)
         {
             if (dialogueTextControl == null || !dialogueTextControl.IsTyping)
             {
