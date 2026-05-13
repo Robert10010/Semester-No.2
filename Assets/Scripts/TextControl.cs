@@ -55,6 +55,15 @@ namespace InteractiveNovelGames.Typography.TextControl
         }
         public void SetText(string Text)
         {
+            // 防護：如果 Awake() 還沒跑過（物件之前是停用的），先手動初始化
+            if (_textBox == null)
+            {
+                _textBox = GetComponent<TMP_Text>();
+                _simpleDeleay = new WaitForSeconds(1 / charactersPerSecond);
+                _interpunctuationDelay = new WaitForSeconds(interpunctuationDelay);
+                _skipdelay = new WaitForSeconds(1 / charactersPerSecond * skipSpeedUp);
+            }
+
             if(_typingCoroutine != null)
                 StopCoroutine(_typingCoroutine);
 
