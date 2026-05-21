@@ -1,0 +1,8 @@
+{
+    "Port": 8080,
+    "RequestTimeoutSeconds": 10,
+    "AutoStartServer": true,
+    "EnableInfoLogs": true,
+    "NpmExecutablePath": "",
+    "AllowRemoteConnections": false
+}

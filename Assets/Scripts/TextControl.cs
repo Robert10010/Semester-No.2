@@ -23,36 +23,21 @@ namespace InteractiveNovelGames.Typography.TextControl
 
         private WaitForSeconds _simpleDeleay;
         private WaitForSeconds _interpunctuationDelay;
-        private WaitForSeconds _skipdelay;
 
         [Header("每秒出現字數")]
         [SerializeField] private float charactersPerSecond = 20f;
         [SerializeField] private float interpunctuationDelay = 0.5f;
-        [Header("跳過設定")]
-        [SerializeField] private bool Skip;
-        [SerializeField] [Min(1)] private int skipSpeedUp = 5;
+
+        // 標點符號集合，用於判斷停頓
+        private readonly System.Collections.Generic.HashSet<char> _punctuationChars = new System.Collections.Generic.HashSet<char> { '.', ',', '!', '?', '…', ':', ';' };
 
         void Awake()
         {
             _textBox = GetComponent<TMP_Text>();
-
             _simpleDeleay = new WaitForSeconds(1/charactersPerSecond);
             _interpunctuationDelay = new WaitForSeconds(interpunctuationDelay);
-            _skipdelay = new WaitForSeconds(1/charactersPerSecond * skipSpeedUp);
         }
-        // 移除了 Start()，因為現在由 DialogueManager 主動呼叫 SetText
-        private void Update()
-        {
-            bool spacePressed = Keyboard.current != null && Keyboard.current.spaceKey.wasPressedThisFrame;
-            if(Skip && spacePressed)
-            {
-                if(_typingCoroutine != null)
-                {
-                    StopCoroutine(_typingCoroutine);
-                    _textBox.maxVisibleCharacters = _textBox.textInfo.characterCount;
-                }
-            }
-        }
+        
         public void SetText(string Text)
         {
             // 防護：如果 Awake() 還沒跑過（物件之前是停用的），先手動初始化
@@ -61,7 +46,6 @@ namespace InteractiveNovelGames.Typography.TextControl
                 _textBox = GetComponent<TMP_Text>();
                 _simpleDeleay = new WaitForSeconds(1 / charactersPerSecond);
                 _interpunctuationDelay = new WaitForSeconds(interpunctuationDelay);
-                _skipdelay = new WaitForSeconds(1 / charactersPerSecond * skipSpeedUp);
             }
 
             if(_typingCoroutine != null)
@@ -86,16 +70,39 @@ namespace InteractiveNovelGames.Typography.TextControl
                 _textBox.maxVisibleCharacters = _textBox.textInfo.characterCount;
             }
         }
+
+        /// <summary>
+        /// 停止打字並清除文字內容
+        /// </summary>
+        public void ClearText()
+        {
+            if (_typingCoroutine != null)
+            {
+                StopCoroutine(_typingCoroutine);
+                _typingCoroutine = null;
+            }
+
+            _textBox.text = string.Empty;
+        }
+
         private IEnumerator TyperCoroutine()
         {
             TMP_TextInfo textInfo = _textBox.textInfo;
             
             while(_currentVisibleCharacterIndex < textInfo.characterCount)
             {
-                char currentChar = textInfo.characterInfo[_currentVisibleCharacterIndex].character;
+                // 取得當前字元，注意 characterInfo 只包含可見字元
+                char currentChar = textInfo.characterInfo[_currentVisibleCharacterIndex].character; 
+                
+                // 顯示下一個字
                 _textBox.maxVisibleCharacters++;
-                _currentVisibleCharacterIndex++; // 加上這行，否則會變成無窮迴圈！
-                yield return _simpleDeleay;
+                _currentVisibleCharacterIndex++;
+
+                // 根據字元是否為標點符號，決定等待時間
+                if (_punctuationChars.Contains(currentChar))
+                    yield return _interpunctuationDelay;
+                else
+                    yield return _simpleDeleay;
             }
             
             // 打字結束，將協程設為 null

@@ -11,7 +11,13 @@ public class DialogueManager : MonoBehaviour
 {
     [Header("劇本設定")]
     public TextAsset csvFile;         // 拖入你的 CSV 檔案
-    public string startNodeID = "START";
+    
+    [Tooltip("依序填入10個角色對話的起始 NodeID")]
+    public List<string> callerStartNodes = new List<string>();
+    private int currentCallerIndex = 0;
+
+    public enum PhoneState { Idle, Ringing, Talking }
+    public PhoneState currentPhoneState = PhoneState.Idle;
 
     [Header("UI 參考")]
     public TMP_Text nameText;                   // 人物名稱 UI (改為 TMP_Text)
@@ -48,13 +54,32 @@ public class DialogueManager : MonoBehaviour
     // 提供給 GameFlowController 呼叫的方法
     public void StartGame()
     {
-        PlayNode(startNodeID);
+        currentCallerIndex = 0;
+        TriggerNextCall();
+    }
+
+    private void TriggerNextCall()
+    {
+        if (currentCallerIndex < callerStartNodes.Count)
+        {
+            currentPhoneState = PhoneState.Ringing;
+            Debug.Log($"[DialogueManager] 電話響起！等待玩家接聽... (第 {currentCallerIndex + 1} 通)");
+            // TODO: 可在此處加入播放電話響鈴音效的程式碼
+        }
+        else
+        {
+            currentPhoneState = PhoneState.Idle;
+            Debug.Log("[DialogueManager] 10通電話皆已播畢！");
+        }
     }
 
     void Update()
     {
         // 如果遊戲還沒開始 (currentNode 為 null)，就不要處理任何點擊或按鍵
         if (currentNode == null) return;
+        
+        // 若處於尚未接聽狀態，亦不處理對話推進
+        if (currentPhoneState != PhoneState.Talking) return;
 
         // 檢查是否打字完畢需要顯示選項
         if (currentNode.IsChoice == 1 && choicePanel != null && !choicePanel.activeSelf)
@@ -194,6 +219,28 @@ public class DialogueManager : MonoBehaviour
 
     void OnPhoneInput(string number)
     {
+        // === 處理真實電話介面傳來的接聽與掛斷訊號 ===
+        if (number == "ANSWER" && currentPhoneState == PhoneState.Ringing)
+        {
+            currentPhoneState = PhoneState.Talking;
+            Debug.Log("[DialogueManager] 玩家已接聽電話！");
+            PlayNode(callerStartNodes[currentCallerIndex]);
+            return;
+        }
+        else if (number == "HANGUP" && currentPhoneState == PhoneState.Talking)
+        {
+            Debug.Log("[DialogueManager] 玩家已掛斷電話！");
+            currentPhoneState = PhoneState.Idle;
+            currentNode = null;
+            if (dialogueTextControl != null) dialogueTextControl.ClearText();
+            if (nameText != null) nameText.text = "";
+            if (choicePanel != null) choicePanel.SetActive(false);
+            
+            currentCallerIndex++;
+            Invoke(nameof(TriggerNextCall), 2.0f); // 延遲 2 秒後撥打下一通
+            return;
+        }
+
         // 處理手機直接按 Call (傳來 NEXT 訊號)，當作按空白鍵推進劇情
         if (number == "NEXT")
         {

@@ -1,6 +1,24 @@
 using System.Collections;
 using UnityEngine;
+using TMPro; // 引用 TextMeshPro
+using UnityEngine.Playables;
 using InteractiveNovelGames.Typography.TextControl;
+
+/// <summary>
+/// 用於定義在遊戲流程中（如轉場、黑屏）顯示的獨立文字片段的設定。
+/// 這樣可以將相關設定（文字內容、UI元件、字型）打包在一起，方便管理。
+/// </summary>
+[System.Serializable]
+public class InterludeTextSettings
+{
+    [Tooltip("要顯示的文字內容")]
+    [TextArea(2, 5)]
+    public string text = "";
+    [Tooltip("用於顯示文字的 TextControl 元件")]
+    public TextControl textControl;
+    [Tooltip("指定文字的字型，若不指定則使用預設字型")]
+    public TMP_FontAsset font;
+}
 
 public class GameFlowController : MonoBehaviour
 {
@@ -11,24 +29,34 @@ public class GameFlowController : MonoBehaviour
     [Tooltip("正式遊玩的劇情畫面")]
     public GameObject playCanvas;
 
+    [Header("轉場效果")]
+    [Tooltip("用於淡入淡出的 Image 或其父物件")]
+    public GameObject fadeImageObject;
+
     [Header("系統參考")]
     public DialogueManager dialogueManager;
 
-    [Header("轉場設定")]
-    [Tooltip("漸變動畫的時間(秒)")]
-    public float fadeDuration = 1.0f;
+    [Header("淡出轉場文字")]
+    public InterludeTextSettings fadeOutTextSettings;
 
-    [Tooltip("全黑畫面停留的時間(秒)")]
-    public float blackScreenHoldDuration = 3.0f;
+    // 將 "START_GAME" 定義為常數，避免魔法字串
+    private const string StartGameSignal = "START_GAME";
 
-    [Header("黑屏文字設定")]
-    [Tooltip("全黑畫面上顯示的文字內容")]
-    [TextArea(2, 5)]
-    public string blackScreenText = "故事即將開始...";
+    /// <summary>
+    /// [供 Timeline Signal 呼叫] 觸發淡出轉場文字的打字機效果。
+    /// </summary>
+    public void TriggerFadeOutText()
+    {
+        ShowInterludeText(fadeOutTextSettings);
+    }
 
-    [Tooltip("黑屏上的打字機文字元件 (場景中預先建好的 TextControl)")]
-    public TextControl blackScreenTextControl;
-
+    /// <summary>
+    /// [供 Timeline Signal 呼叫] 清除並隱藏淡出轉場文字。
+    /// </summary>
+    public void ClearFadeOutText()
+    {
+        HideInterludeText(fadeOutTextSettings);
+    }
     private bool isTransitioning = false;
 
     void OnEnable()
@@ -48,12 +76,13 @@ public class GameFlowController : MonoBehaviour
         // 遊戲一開始，確保只顯示 StartCanvas
         if (startCanvas != null) startCanvas.SetActive(true);
         if (playCanvas != null) playCanvas.SetActive(false);
+        if (fadeImageObject != null) fadeImageObject.SetActive(false); // 確保轉場圖片預設是關閉的
     }
 
     private void OnPhoneInput(string receivedNumber)
     {
         // 如果收到的是網頁載入時送出的 START_GAME 訊號
-        if (receivedNumber == "START_GAME")
+        if (receivedNumber == StartGameSignal)
         {
             // 防呆機制：只有在 StartCanvas 開啟著的時候（代表還沒開始遊戲），且不是正在轉場中，才允許開始
             if (startCanvas != null && startCanvas.activeSelf && !isTransitioning)
@@ -74,105 +103,65 @@ public class GameFlowController : MonoBehaviour
     {
         isTransitioning = true;
 
-        // 1. 動態建立一個全螢幕的黑色遮罩畫布
-        GameObject fadeObj = new GameObject("BlackFadeScreen");
-        Canvas fadeCanvas = fadeObj.AddComponent<Canvas>();
-        fadeCanvas.renderMode = RenderMode.ScreenSpaceOverlay;
-        fadeCanvas.sortingOrder = 999; // 確保蓋在所有 UI 的最上層
+        // 手動啟用轉場圖片，準備播放動畫
+        if (fadeImageObject != null) fadeImageObject.SetActive(true);
 
-        UnityEngine.UI.Image fadeImage = fadeObj.AddComponent<UnityEngine.UI.Image>();
-        fadeImage.color = Color.black;
+        // ====== 1. 播放漸暗動畫 ======
+        // 文字的顯示與清除，現在已交由 FadeOut Timeline 內部的 Signal 觸發
+        yield return StartCoroutine(TimelineManager.Instance.PlayAndWait("FadeOut"));
 
-        CanvasGroup fadeGroup = fadeObj.AddComponent<CanvasGroup>();
-        fadeGroup.alpha = 0f;
-        fadeGroup.blocksRaycasts = true; // 轉場期間阻擋玩家點擊
-
-        float halfDuration = fadeDuration / 2f;
-        float elapsedTime = 0f;
-
-        // 2. 漸暗至全黑 (Fade to Black)
-        while (elapsedTime < halfDuration)
-        {
-            elapsedTime += Time.deltaTime;
-            fadeGroup.alpha = Mathf.Lerp(0f, 1f, elapsedTime / halfDuration);
-            yield return null;
-        }
-        fadeGroup.alpha = 1f;
-
-        // 3. 在全黑的狀態下，切換背後的畫布
+        // ====== 2. 在全黑的狀態下，切換背後的畫布 ======
         if (startCanvas != null) startCanvas.SetActive(false);
-        if (playCanvas != null) playCanvas.SetActive(true);
-
-        // 如果 PlayCanvas 上面有 CanvasGroup，確保它是完全不透明的 (避免之前的設定殘留)
         if (playCanvas != null)
         {
+            playCanvas.SetActive(true);
+            // 如果 PlayCanvas 上面有 CanvasGroup，確保它是完全不透明的 (避免之前的設定殘留)
             CanvasGroup pg = playCanvas.GetComponent<CanvasGroup>();
             if (pg != null) pg.alpha = 1f;
         }
 
-        // ---- 黑屏期間：用 TextControl 的打字機效果顯示文字 ----
-        if (blackScreenTextControl != null && !string.IsNullOrEmpty(blackScreenText))
-        {
-            // 記住文字物件原本的父物件，等等要搬回去
-            Transform originalParent = blackScreenTextControl.transform.parent;
+        // ====== 4. 播放漸亮動畫 ======
+        yield return StartCoroutine(TimelineManager.Instance.PlayAndWait("FadeIn"));
 
-            // 把文字物件暫時搬到黑色遮罩畫布底下，這樣只有文字會顯示在黑幕上方
-            blackScreenTextControl.transform.SetParent(fadeObj.transform, false);
-            blackScreenTextControl.gameObject.SetActive(true);
-
-            // 設定 RectTransform 讓文字在黑幕上置中顯示
-            RectTransform rt = blackScreenTextControl.GetComponent<RectTransform>();
-            rt.anchorMin = Vector2.zero;
-            rt.anchorMax = Vector2.one;
-            rt.offsetMin = Vector2.zero;
-            rt.offsetMax = Vector2.zero;
-
-            // 觸發打字機效果
-            blackScreenTextControl.SetText(blackScreenText);
-
-            // 等待打字機跑完
-            while (blackScreenTextControl.IsTyping)
-            {
-                yield return null;
-            }
-
-            // 打字完畢後，再額外停留一段時間讓玩家閱讀
-            if (blackScreenHoldDuration > 0f)
-            {
-                yield return new WaitForSeconds(blackScreenHoldDuration);
-            }
-
-            // 搬回原本的父物件、清空文字、隱藏
-            blackScreenTextControl.SetText("");
-            blackScreenTextControl.transform.SetParent(originalParent, false);
-            blackScreenTextControl.gameObject.SetActive(false);
-        }
-        else
-        {
-            // 沒有設定文字的話，就單純停留全黑畫面
-            if (blackScreenHoldDuration > 0f)
-            {
-                yield return new WaitForSeconds(blackScreenHoldDuration);
-            }
-        }
-
-        // 4. 從全黑漸亮 (Fade from Black)
-        elapsedTime = 0f;
-        while (elapsedTime < halfDuration)
-        {
-            elapsedTime += Time.deltaTime;
-            fadeGroup.alpha = Mathf.Lerp(1f, 0f, elapsedTime / halfDuration);
-            yield return null;
-        }
-
-        // 5. 轉場結束，銷毀黑色遮罩並開始遊戲
-        Destroy(fadeObj);
-
+        // ====== 5. 轉場結束，正式開始遊戲對話 ======
         if (dialogueManager != null)
         {
             dialogueManager.StartGame();
         }
 
+        // 轉場完全結束，關閉轉場圖片
+        if (fadeImageObject != null) fadeImageObject.SetActive(false);
+
         isTransitioning = false;
+    }
+
+    /// <summary>
+    /// 根據提供的設定來顯示一段插曲文字。
+    /// </summary>
+    /// <param name="settings">包含文字內容、UI 元件和字型的設定。</param>
+    private void ShowInterludeText(InterludeTextSettings settings)
+    {
+        if (settings == null || settings.textControl == null || string.IsNullOrEmpty(settings.text)) return;
+
+        // 套用自訂字型 (如果有的話)
+        if (settings.font != null)
+        {
+            TMP_Text tmp = settings.textControl.GetComponent<TMP_Text>();
+            if (tmp != null) tmp.font = settings.font;
+        }
+
+        settings.textControl.gameObject.SetActive(true);
+        settings.textControl.SetText(settings.text);
+    }
+
+    /// <summary>
+    /// 根據提供的設定來清除並隱藏一段插曲文字。
+    /// </summary>
+    private void HideInterludeText(InterludeTextSettings settings)
+    {
+        if (settings == null || settings.textControl == null) return;
+
+        settings.textControl.ClearText();
+        settings.textControl.gameObject.SetActive(false);
     }
 }
