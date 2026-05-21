@@ -57,6 +57,36 @@ public class GameFlowController : MonoBehaviour
     {
         HideInterludeText(fadeOutTextSettings);
     }
+
+    /// <summary>
+    /// [供 Timeline Signal 呼叫] 立即關閉開始畫布，避免與 Timeline 狀態衝突。
+    /// </summary>
+    public void CloseStartCanvas()
+    {
+        if (startCanvas != null) 
+        {
+            startCanvas.SetActive(false);
+            Debug.Log("[GameFlowController] 已透過 Signal 關閉 StartCanvas。");
+        }
+    }
+
+    /// <summary>
+    /// [供 Timeline Signal 呼叫] 立即開啟正式遊玩畫布，並確保其 CanvasGroup 透明度正常。
+    /// </summary>
+    public void OpenPlayCanvas()
+    {
+        if (playCanvas != null)
+        {
+            playCanvas.SetActive(true);
+            
+            // 如果 PlayCanvas 上面有 CanvasGroup，確保它是完全不透明的
+            CanvasGroup pg = playCanvas.GetComponent<CanvasGroup>();
+            if (pg != null) pg.alpha = 1f;
+            
+            Debug.Log("[GameFlowController] 已透過 Signal 開啟 PlayCanvas。");
+        }
+    }
+
     private bool isTransitioning = false;
 
     void OnEnable()

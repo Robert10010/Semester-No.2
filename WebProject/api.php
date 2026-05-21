@@ -72,7 +72,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'read') {
 //    只刪最舊一筆，避免同時多封訊號遺失
 // ================================================================
 if (isset($_POST['action']) && $_POST['action'] === 'clear') {
-    $pdo->exec("DELETE FROM signals");
+    $pdo->exec("DELETE FROM signals ORDER BY id ASC LIMIT 1");
     echo "Cleared";
     exit;
 }
