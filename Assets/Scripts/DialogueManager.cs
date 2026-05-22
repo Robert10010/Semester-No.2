@@ -31,6 +31,12 @@ public class DialogueManager : MonoBehaviour
     [Tooltip("請放入 PlayCanvas 中的 Character 父物件，裡面的子物件名稱必須與 Tag 相同")]
     public Transform charactersParent;
 
+    [Header("電話話筒狀態設定")]
+    [Tooltip("電話接通時開啟的子項目 (話筒拿起)")]
+    public GameObject phonePickUp;
+    [Tooltip("掛斷或未接通時開啟的子項目 (話筒放下)")]
+    public GameObject phoneDown;
+
     [Header("UI 參考")]
     public GameObject dialogueBox;              // 對話框背景物件
     public TMP_Text nameText;                   // 人物名稱 UI (改為 TMP_Text)
@@ -63,6 +69,7 @@ public class DialogueManager : MonoBehaviour
     void Start()
     {
         LoadCSV();
+        UpdatePhoneVisuals(false); // 預設關閉 PickUp，開啟 down
         // 移除了這裡的 PlayNode(startNodeID);，改為等 GameFlowController 呼叫 StartGame() 時才播放
     }
 
@@ -76,6 +83,9 @@ public class DialogueManager : MonoBehaviour
 
         // 遊戲一開始，隱藏所有角色物件
         HideAllCharacters();
+        
+        // 遊戲一開始，確保電話狀態正確 (放下狀態)
+        UpdatePhoneVisuals(false);
         
         // 隱藏對話框與文字
         if (dialogueBox != null) dialogueBox.SetActive(false);
@@ -324,6 +334,13 @@ public class DialogueManager : MonoBehaviour
         PlayNode(currentNode.NextID);
     }
 
+    // --- 電話視覺狀態控制 ---
+    private void UpdatePhoneVisuals(bool isPickedUp)
+    {
+        if (phonePickUp != null) phonePickUp.SetActive(isPickedUp);
+        if (phoneDown != null) phoneDown.SetActive(!isPickedUp);
+    }
+
     // --- 角色顯示控制 ---
     private void HideAllCharacters()
     {
@@ -350,6 +367,10 @@ public class DialogueManager : MonoBehaviour
         if (currentPhoneState == PhoneState.Idle) return; // 避免重複觸發
 
         currentPhoneState = PhoneState.Idle;
+        
+        // 確保掛斷時狀態為放下
+        UpdatePhoneVisuals(false);
+
         currentNode = null;
         if (dialogueTextControl != null) dialogueTextControl.ClearText();
         if (nameText != null) nameText.text = "";
@@ -396,6 +417,9 @@ public class DialogueManager : MonoBehaviour
             isInitialCallAction = true; // 標記為剛接通，等待三大選項
             Debug.Log("[DialogueManager] 玩家已接聽電話！");
             
+            // 接通時：開啟 PickUp，關閉 down
+            UpdatePhoneVisuals(true);
+            
             // 根據目前的 Tag 顯示對應的角色物件
             string currentTag = callerTags[currentCallerIndex];
             ShowCharacterByTag(currentTag);
@@ -415,6 +439,9 @@ public class DialogueManager : MonoBehaviour
                 Debug.LogWarning("[DialogueManager] 忽略過快的掛斷訊號 (可能是硬體開關彈跳)。");
                 return;
             }
+
+            // 掛斷時：關閉 PickUp，開啟 down
+            UpdatePhoneVisuals(false);
 
             string tag = callerTags[currentCallerIndex];
             string targetNodeId = tag + "_HangUp";
@@ -476,6 +503,10 @@ public class DialogueManager : MonoBehaviour
                     {
                         targetNodeId = tag + "_HangUp";
                     }
+                    
+                    // 掛斷時：關閉 PickUp，開啟 down
+                    UpdatePhoneVisuals(false);
+                    
                     PlayNode(targetNodeId);
                 }
                 else if (number == "2") // 2. 轉接
