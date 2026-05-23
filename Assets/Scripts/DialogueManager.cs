@@ -7,6 +7,7 @@ using InteractiveNovelGames.Typography.TextControl; // 載入你的 TextControl 
 using System;
 using UnityEngine.InputSystem;
 using UnityEngine.Playables; // 支援 Timeline/Playable 控制
+using UnityEngine.SceneManagement; // 支援結局場景跳轉
 
 public class DialogueManager : MonoBehaviour
 {
@@ -71,6 +72,14 @@ public class DialogueManager : MonoBehaviour
     private bool isNewCallJustAnswered = false; // 標記是否為剛接通的第一句話，以強制播放漸顯 Timeline
     private Coroutine reversePlayCoroutine;     // 控制漸隱（倒放）的協程
 
+    [Header("遊戲時間限制設定")]
+    [Tooltip("遊戲限時時間 (秒)，預設 180 秒 (3 分鐘)")]
+    public float maxGameDuration = 180f;
+    private float gameTimer = 0f;
+    private bool isTimerRunning = false;
+    private bool isTimeUp = false;
+    private bool isFirstFadeOut = true; // 標記是否為遊戲開始的第一次 Fadeout
+
     private TextControl ActiveTextControl
     {
         get
@@ -104,6 +113,12 @@ public class DialogueManager : MonoBehaviour
     public void StartGame()
     {
         currentCallerIndex = 0;
+        
+        // 重設限時與計時器狀態
+        gameTimer = 0f;
+        isTimerRunning = false;
+        isTimeUp = false;
+        isFirstFadeOut = true;
         
         // 遊戲一開始，確保鈴聲是停止的
         if (AudioManager.Instance != null) AudioManager.Instance.StopLoopingSFX();
@@ -151,6 +166,27 @@ public class DialogueManager : MonoBehaviour
 
     void Update()
     {
+        // 累加遊戲計時
+        if (isTimerRunning && !isTimeUp)
+        {
+            gameTimer += Time.deltaTime;
+            if (gameTimer >= maxGameDuration)
+            {
+                isTimeUp = true;
+                isTimerRunning = false;
+                Debug.Log("[DialogueManager] 限制時間已到！當前累計時間: " + gameTimer);
+            }
+        }
+
+        // 當計時結束，且當前不在通話中（沒有在 Talking），立刻跳轉結局 EndingScenes
+        if (isTimeUp && currentPhoneState != PhoneState.Talking)
+        {
+            isTimeUp = false; // 防重複觸發
+            Debug.Log("[DialogueManager] 限時已到且當前無通話，正在跳轉至結局 EndingScenes...");
+            SceneManager.LoadScene("EndingScenes");
+            return;
+        }
+
         // 強制安全機制：確保非響鈴狀態時，鈴聲絕對不會繼續播放
         if (currentPhoneState != PhoneState.Ringing && AudioManager.Instance != null && AudioManager.Instance.sfxSource.isPlaying && AudioManager.Instance.sfxSource.loop)
         {
@@ -170,6 +206,26 @@ public class DialogueManager : MonoBehaviour
             if (!isInitialCallAction && currentNode.IsChoice == 1 && choicePanel != null && !choicePanel.activeSelf)
             {
                 ShowChoices();
+            }
+        }
+
+        // 電腦端鍵盤測試映射：按鍵盤 1, 2, 3 模擬手機發送的按鍵信號
+        if (Keyboard.current != null)
+        {
+            if (Keyboard.current.digit1Key.wasPressedThisFrame || Keyboard.current.numpad1Key.wasPressedThisFrame)
+            {
+                OnPhoneInput("1");
+                return;
+            }
+            if (Keyboard.current.digit2Key.wasPressedThisFrame || Keyboard.current.numpad2Key.wasPressedThisFrame)
+            {
+                OnPhoneInput("2");
+                return;
+            }
+            if (Keyboard.current.digit3Key.wasPressedThisFrame || Keyboard.current.numpad3Key.wasPressedThisFrame)
+            {
+                OnPhoneInput("3");
+                return;
             }
         }
 
@@ -510,6 +566,16 @@ public class DialogueManager : MonoBehaviour
         {
             child.gameObject.SetActive(false);
         }
+
+        // 如果是遊戲開始的第一次 Fadeout timeline 播放完畢，正式開始啟動遊戲時間限制！
+        if (isFirstFadeOut)
+        {
+            isFirstFadeOut = false;
+            isTimerRunning = true;
+            gameTimer = 0f;
+            isTimeUp = false;
+            Debug.Log("[DialogueManager] 關卡開場 Fadeout 播放完畢，開始 3 分鐘遊戲限時計時！");
+        }
     }
 
     private void ShowCharacterByTag(string tag, string characterName)
@@ -619,6 +685,15 @@ public class DialogueManager : MonoBehaviour
         
         // 電話掛斷，隱藏畫面上的角色
         HideAllCharacters();
+        
+        // 檢查限時是否已到。若已到，立即跳轉結局場景，不再排程下一通電話！
+        if (isTimeUp)
+        {
+            isTimeUp = false; // 防重複觸發
+            Debug.Log("[DialogueManager] 當下通話已結束且時間已到，正在載入結局場景 EndingScenes...");
+            SceneManager.LoadScene("EndingScenes");
+            return;
+        }
         
         CancelInvoke(nameof(TriggerNextCall)); // 防呆：確保不會重複排程下一通電話
         currentCallerIndex++;
