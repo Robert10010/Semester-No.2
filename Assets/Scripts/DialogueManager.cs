@@ -8,6 +8,7 @@ using System;
 using UnityEngine.InputSystem;
 using UnityEngine.Playables; // 支援 Timeline/Playable 控制
 using UnityEngine.SceneManagement; // 支援結局場景跳轉
+using UnityEngine.Video; // 支援影片播放器控制
 
 public class DialogueManager : MonoBehaviour
 {
@@ -80,6 +81,17 @@ public class DialogueManager : MonoBehaviour
     private bool isTimeUp = false;
     private bool isFirstFadeOut = true; // 標記是否為遊戲開始的第一次 Fadeout
 
+    [Header("電視影片設定")]
+    [Tooltip("播電視影片的 VideoPlayer 組件")]
+    public VideoPlayer tvVideoPlayer;
+    [Tooltip("用於控制電視影片漸暗的 CanvasGroup 組件")]
+    public CanvasGroup tvVideoCanvasGroup;
+    [Tooltip("用於 2D 角色遮罩電視影片的 GameObject (對應 TV_Video_mask)")]
+    public GameObject tvVideoMaskObject;
+    [Tooltip("電視影片漸暗消失的時間 (秒)")]
+    public float tvFadeDuration = 0.5f;
+    private Coroutine tvFadeCoroutine; // 電視漸暗協程
+
     private TextControl ActiveTextControl
     {
         get
@@ -119,6 +131,30 @@ public class DialogueManager : MonoBehaviour
         isTimerRunning = false;
         isTimeUp = false;
         isFirstFadeOut = true;
+        
+        // 遊戲一開始，開啟電視噪聲影片的播放並將透明度重設為 1
+        if (tvFadeCoroutine != null)
+        {
+            StopCoroutine(tvFadeCoroutine);
+            tvFadeCoroutine = null;
+        }
+        if (tvVideoPlayer != null)
+        {
+            tvVideoPlayer.gameObject.SetActive(true);
+            tvVideoPlayer.isLooping = true;
+            tvVideoPlayer.Play();
+        }
+        if (tvVideoCanvasGroup != null)
+        {
+            tvVideoCanvasGroup.gameObject.SetActive(true);
+            tvVideoCanvasGroup.alpha = 1f;
+        }
+        if (tvVideoMaskObject != null)
+        {
+            tvVideoMaskObject.SetActive(true);
+            CanvasGroup cg = tvVideoMaskObject.GetComponent<CanvasGroup>();
+            if (cg != null) cg.alpha = 1f;
+        }
         
         // 遊戲一開始，確保鈴聲是停止的
         if (AudioManager.Instance != null) AudioManager.Instance.StopLoopingSFX();
@@ -562,8 +598,19 @@ public class DialogueManager : MonoBehaviour
     private void DisableAllCharacterObjects()
     {
         if (charactersParent == null) return;
+
+        // 在隱藏所有角色前，先把電視遮罩影片 UI 物件移回父空物件 charactersParent，防止它因為跟著角色 inactive 而消失！
+        if (tvVideoMaskObject != null)
+        {
+            tvVideoMaskObject.transform.SetParent(charactersParent, false);
+            tvVideoMaskObject.SetActive(true);
+        }
+
         foreach (Transform child in charactersParent)
         {
+            // 排除電視遮罩影片 UI 本身，不要把電視遮罩也關閉了
+            if (tvVideoMaskObject != null && child == tvVideoMaskObject.transform) continue;
+
             child.gameObject.SetActive(false);
         }
 
@@ -594,16 +641,28 @@ public class DialogueManager : MonoBehaviour
 
         bool needFadeIn = false;
         int childCount = charactersParent.childCount;
+        Transform matchedChild = null; // 用於延遲記錄匹配成功的角色
 
         for (int i = 0; i < childCount; i++)
         {
             Transform child = charactersParent.GetChild(i);
             
+            // 排除電視遮罩影片本身，不要在遍歷時將它關閉了！
+            if (tvVideoMaskObject != null && child == tvVideoMaskObject.transform) continue;
+            
             // 匹配邏輯：
-            // 1. 如果只有一個子物件，直接無條件匹配成功！
-            // 2. 否則進行名字雙重模糊匹配（支持完全一致或雙向包含關係，不區分大小寫）
+            // 1. 如果子物件只有一個，或者扣除電視遮罩後只有一個，直接匹配成功！
+            // 2. 否則進行名字雙重模糊匹配
             bool isMatch = false;
-            if (childCount == 1)
+            
+            // 計算當前真正代表角色的子物件數量
+            int characterChildCount = childCount;
+            if (tvVideoMaskObject != null && charactersParent.Find(tvVideoMaskObject.name) != null)
+            {
+                characterChildCount--;
+            }
+
+            if (characterChildCount == 1)
             {
                 isMatch = true;
             }
@@ -630,10 +689,28 @@ public class DialogueManager : MonoBehaviour
                     child.gameObject.SetActive(true);
                     needFadeIn = true;
                 }
+                matchedChild = child; // 延遲記錄匹配成功的角色，防越界 Bug
             }
             else
             {
                 child.gameObject.SetActive(false);
+            }
+        }
+
+        // 【延遲 Reparent】在 for 循環完全結束後，再執行 SetParent，100% 避免 child out of bounds 越界 Bug！
+        if (matchedChild != null && tvVideoMaskObject != null)
+        {
+            tvVideoMaskObject.transform.SetParent(matchedChild, false);
+            tvVideoMaskObject.transform.localScale = Vector3.one; // 強制重置 Scale 防止黑洞/縮小 Bug
+            
+            // 重設 RectTransform，使其在 2D 角色物件內完全拉滿填滿大小
+            RectTransform rect = tvVideoMaskObject.GetComponent<RectTransform>();
+            if (rect != null)
+            {
+                rect.anchorMin = Vector2.zero;
+                rect.anchorMax = Vector2.one;
+                rect.offsetMin = Vector2.zero;
+                rect.offsetMax = Vector2.zero;
             }
         }
 
@@ -899,5 +976,41 @@ public class DialogueManager : MonoBehaviour
                 Debug.LogWarning($"未知的效果類型: {effect}");
                 break;
         }
+    }
+
+    // --- 電視噪聲控制 ---
+    private void FadeOutTVNoise()
+    {
+        // 只有在電視播放器正在播放且啟用時，才觸發漸暗
+        if (tvVideoPlayer == null || !tvVideoPlayer.gameObject.activeInHierarchy) return;
+
+        if (tvFadeCoroutine != null) StopCoroutine(tvFadeCoroutine);
+        tvFadeCoroutine = StartCoroutine(FadeOutTVNoiseRoutine());
+    }
+
+    private IEnumerator FadeOutTVNoiseRoutine()
+    {
+        if (tvVideoCanvasGroup != null)
+        {
+            float startAlpha = tvVideoCanvasGroup.alpha;
+            float elapsed = 0f;
+
+            while (elapsed < tvFadeDuration)
+            {
+                elapsed += Time.deltaTime;
+                tvVideoCanvasGroup.alpha = Mathf.Lerp(startAlpha, 0f, elapsed / tvFadeDuration);
+                yield return null;
+            }
+
+            tvVideoCanvasGroup.alpha = 0f;
+        }
+
+        if (tvVideoPlayer != null)
+        {
+            tvVideoPlayer.Stop();
+            tvVideoPlayer.gameObject.SetActive(false);
+        }
+
+        tvFadeCoroutine = null;
     }
 }
