@@ -9,9 +9,19 @@ using UnityEngine.Networking;
 /// </summary>
 public class PhoneConnectionManager : MonoBehaviour
 {
+    public static PhoneConnectionManager Instance { get; private set; }
+
     [Header("伺服器設定")]
     [Tooltip("請輸入你的 PHP 伺服器網址 (例如: http://192.168.1.100/WebProject/api.php)")]
     public string apiEndpoint = "https://visualnovel.gamer.gd/WebProject/api.php";
+
+    private void Awake()
+    {
+        if (Instance == null)
+        {
+            Instance = this;
+        }
+    }
     
     [Tooltip("多久向 PHP 詢問一次是否有新號碼 (單位: 秒)")]
     public float pollInterval = 1.0f;
@@ -120,6 +130,37 @@ public class PhoneConnectionManager : MonoBehaviour
             if (webRequest.result == UnityWebRequest.Result.Success)
             {
                 Debug.Log("[PhoneConnectionManager] 已通知 PHP 清空號碼紀錄。");
+            }
+        }
+    }
+
+    /// <summary>
+    /// 向手機端發送訊號指令 (例如 RING, HANGUP_SFX 等)
+    /// </summary>
+    public void SendSignalToPhone(string signalName)
+    {
+        StartCoroutine(SendSignalToPhoneCoroutine(signalName));
+    }
+
+    private IEnumerator SendSignalToPhoneCoroutine(string signalName)
+    {
+        WWWForm form = new WWWForm();
+        form.AddField("action", "send_to_phone");
+        form.AddField("signal", signalName);
+
+        using (UnityWebRequest webRequest = UnityWebRequest.Post(apiEndpoint, form))
+        {
+            webRequest.SetRequestHeader("User-Agent", "Mozilla/5.0");
+            webRequest.SetRequestHeader("ngrok-skip-browser-warning", "1");
+            yield return webRequest.SendWebRequest();
+
+            if (webRequest.result == UnityWebRequest.Result.Success)
+            {
+                Debug.Log($"[PhoneConnectionManager] 成功傳送訊號給手機: {signalName}");
+            }
+            else
+            {
+                Debug.LogWarning($"[PhoneConnectionManager] 傳送訊號給手機失敗: {webRequest.error}");
             }
         }
     }

@@ -78,6 +78,32 @@ if (isset($_POST['action']) && $_POST['action'] === 'clear') {
 }
 
 // ================================================================
+// 4. 供 Unity 發送指令給手機端（POST: action=send_to_phone&signal=XXX）
+// ================================================================
+if (isset($_POST['action']) && $_POST['action'] === 'send_to_phone' && isset($_POST['signal'])) {
+    $signal = trim($_POST['signal']);
+    file_put_contents('to_phone.txt', $signal);
+    echo "Signal sent to phone: " . $signal;
+    exit;
+}
+
+// ================================================================
+// 5. 供手機端讀取來自 Unity 的指令（GET: ?action=read_to_phone）
+// ================================================================
+if (isset($_GET['action']) && $_GET['action'] === 'read_to_phone') {
+    $file = 'to_phone.txt';
+    if (file_exists($file)) {
+        $signal = trim(file_get_contents($file));
+        // 讀取後清空，避免重複讀取
+        file_put_contents($file, '');
+        echo $signal;
+    } else {
+        echo "";
+    }
+    exit;
+}
+
+// ================================================================
 // 預設說明頁（直接瀏覽器開啟時顯示）
 // ================================================================
 header("Content-Type: text/html; charset=UTF-8");

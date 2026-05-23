@@ -1,7 +1,6 @@
 using UnityEngine;
 using System;
 using System.Collections;
-using UnityEngine;
 using TMPro;
 using UnityEngine.InputSystem;
 
@@ -63,11 +62,19 @@ namespace InteractiveNovelGames.Typography.TextControl
         // 新增：讓外部呼叫跳過打字機
         public void SkipTypewriter()
         {
+            if (_textBox == null)
+            {
+                _textBox = GetComponent<TMP_Text>();
+            }
+
             if(_typingCoroutine != null)
             {
                 StopCoroutine(_typingCoroutine);
                 _typingCoroutine = null;
-                _textBox.maxVisibleCharacters = _textBox.textInfo.characterCount;
+                if (_textBox != null)
+                {
+                    _textBox.maxVisibleCharacters = _textBox.textInfo.characterCount;
+                }
             }
         }
 
@@ -76,13 +83,21 @@ namespace InteractiveNovelGames.Typography.TextControl
         /// </summary>
         public void ClearText()
         {
+            if (_textBox == null)
+            {
+                _textBox = GetComponent<TMP_Text>();
+            }
+
             if (_typingCoroutine != null)
             {
                 StopCoroutine(_typingCoroutine);
                 _typingCoroutine = null;
             }
 
-            _textBox.text = string.Empty;
+            if (_textBox != null)
+            {
+                _textBox.text = string.Empty;
+            }
         }
 
         private IEnumerator TyperCoroutine()
