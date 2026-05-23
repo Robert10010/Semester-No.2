@@ -148,7 +148,7 @@ RectTransform:
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
   m_LocalScale: {x: 2.2, y: 2.1525, z: 2.1525}
-  m_ConstrainProportionsScale: 0
+  m_ConstrainProportionsScale: 1
   m_Children:
   - {fileID: 2128916549}
   m_Father: {fileID: 994701876}
@@ -222,7 +222,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_Sprite: {fileID: 21300000, guid: b187471d8fe94c34bb5498ea349b0158, type: 3}
+  m_Sprite: {fileID: 21300000, guid: fe6773bdbfcf00c40b30fa5b70ed8975, type: 3}
   m_Type: 0
   m_PreserveAspect: 1
   m_FillCenter: 1
@@ -276,7 +276,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
-  m_AnchoredPosition: {x: 0, y: 10}
+  m_AnchoredPosition: {x: 100, y: 10}
   m_SizeDelta: {x: 160, y: 30}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &79940256
@@ -343,7 +343,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_Sprite: {fileID: 21300000, guid: 1dd39221f9654ee49af1927771c471fe, type: 3}
+  m_Sprite: {fileID: 21300000, guid: fe6773bdbfcf00c40b30fa5b70ed8975, type: 3}
   m_Type: 0
   m_PreserveAspect: 0
   m_FillCenter: 1
@@ -538,7 +538,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
-  m_AnchoredPosition: {x: 0, y: 94.99997}
+  m_AnchoredPosition: {x: 50, y: 90}
   m_SizeDelta: {x: 160, y: 30}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &129971505
@@ -605,7 +605,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_Sprite: {fileID: 21300000, guid: f898173bd3753cd4db8593b58b84fbdc, type: 3}
+  m_Sprite: {fileID: 21300000, guid: fe6773bdbfcf00c40b30fa5b70ed8975, type: 3}
   m_Type: 0
   m_PreserveAspect: 0
   m_FillCenter: 1
@@ -3139,8 +3139,8 @@ RectTransform:
   m_GameObject: {fileID: 994701875}
   m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 0
+  m_LocalScale: {x: 0.85, y: 0.85, z: 0.85}
+  m_ConstrainProportionsScale: 1
   m_Children:
   - {fileID: 849147}
   - {fileID: 129971504}
@@ -3149,7 +3149,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0, y: 0}
   m_AnchorMax: {x: 1, y: 1}
-  m_AnchoredPosition: {x: 0, y: 0}
+  m_AnchoredPosition: {x: -111.4, y: -137.4}
   m_SizeDelta: {x: 699.99994, y: 349.99997}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &994701877
@@ -4231,7 +4231,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 0
+  m_IsActive: 1
 --- !u!224 &1551629350
 RectTransform:
   m_ObjectHideFlags: 0
@@ -4397,14 +4397,19 @@ MonoBehaviour:
   csvFile: {fileID: 4900000, guid: 19311d0615500694f89820b32a635e74, type: 3}
   callerStartNodes: []
   currentPhoneState: 0
-  phoneAudioSource: {fileID: 0}
-  ringtoneClip: {fileID: 0}
+  ringtoneSFXName: Phone_ring
+  phonePickUpSFXName: Phone_pick
+  phonePutDownSFXName: Phone_put
   charactersParent: {fileID: 1050235976}
+  characterDirector: {fileID: 649334548}
   phonePickUp: {fileID: 130698903}
   phoneDown: {fileID: 1250543449}
   dialogueBox: {fileID: 1551629349}
+  dialogueBoxUser: {fileID: 409950512}
   nameText: {fileID: 2033797633}
   dialogueTextControl: {fileID: 542080669}
+  dialogueTextControlUser: {fileID: 1713997723}
+  playerCharacterName: "\u73A9\u5BB6"
   choicePanel: {fileID: 994701875}
   choiceTexts:
   - {fileID: 2128916550}

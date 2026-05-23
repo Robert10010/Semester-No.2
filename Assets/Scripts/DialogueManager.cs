@@ -49,13 +49,15 @@ public class DialogueManager : MonoBehaviour
     public GameObject phoneDown;
 
     [Header("UI 參考")]
-    public GameObject dialogueBox;              // 對話框背景物件
+    public GameObject dialogueBox;              // 對話框背景物件 (NPC 用)
+    public GameObject dialogueBoxUser;          // 玩家專用對話框背景物件 (玩家用)
     public TMP_Text nameText;                   // 人物名稱 UI (改為 TMP_Text)
     public TextControl dialogueTextControl;     // 對話內容 UI (改為你自訂的 TextControl)
+    public TextControl dialogueTextControlUser; // 玩家對話內容 UI (改為你自訂的 TextControl)
 
     [Header("玩家角色設定")]
-    [Tooltip("劇本 CSV 中代表玩家的名字 (例如: 我)")]
-    public string playerCharacterName = "我";
+    [Tooltip("劇本 CSV 中代表玩家的名字 (例如: 玩家)")]
+    public string playerCharacterName = "玩家"; // 【修復】預設直接改為 "玩家"，完美對齊劇本
 
     [Header("選項設定 (UI)")]
     public GameObject choicePanel;              // 裝載選項文字的父物件 (平時隱藏)
@@ -65,6 +67,18 @@ public class DialogueManager : MonoBehaviour
     private Dictionary<string, DialogueNode> dialogueDatabase = new Dictionary<string, DialogueNode>();
     
     private DialogueNode currentNode;
+
+    private bool isNewCallJustAnswered = false; // 標記是否為剛接通的第一句話，以強制播放漸顯 Timeline
+    private Coroutine reversePlayCoroutine;     // 控制漸隱（倒放）的協程
+
+    private TextControl ActiveTextControl
+    {
+        get
+        {
+            bool isPlayer = (currentNode != null && currentNode.Character == playerCharacterName);
+            return (isPlayer && dialogueTextControlUser != null) ? dialogueTextControlUser : dialogueTextControl;
+        }
+    }
 
     private float lastAnswerTime = -999f;
 
@@ -84,7 +98,6 @@ public class DialogueManager : MonoBehaviour
     {
         LoadCSV();
         UpdatePhoneVisuals(false); // 預設關閉 PickUp，開啟 down
-        // 移除了這裡的 PlayNode(startNodeID);，改為等 GameFlowController 呼叫 StartGame() 時才播放
     }
 
     // 提供給 GameFlowController 呼叫的方法
@@ -103,7 +116,9 @@ public class DialogueManager : MonoBehaviour
         
         // 隱藏對話框與文字
         if (dialogueBox != null) dialogueBox.SetActive(false);
+        if (dialogueBoxUser != null) dialogueBoxUser.SetActive(false);
         if (dialogueTextControl != null) dialogueTextControl.gameObject.SetActive(false);
+        if (dialogueTextControlUser != null) dialogueTextControlUser.gameObject.SetActive(false);
         
         TriggerNextCall();
     }
@@ -149,7 +164,7 @@ public class DialogueManager : MonoBehaviour
         if (currentPhoneState != PhoneState.Talking) return;
 
         // 檢查是否打字完畢需要顯示選項
-        if (dialogueTextControl == null || !dialogueTextControl.IsTyping)
+        if (ActiveTextControl == null || !ActiveTextControl.IsTyping)
         {
             // 如果是剛接通的第一句話 (isInitialCallAction)，不顯示 UI 選項，單純等待玩家用手機輸入 1, 2, 3
             if (!isInitialCallAction && currentNode.IsChoice == 1 && choicePanel != null && !choicePanel.activeSelf)
@@ -164,10 +179,10 @@ public class DialogueManager : MonoBehaviour
         // 點擊滑鼠左鍵 或 按下空白鍵 推進劇情
         if (clicked || spacePressed)
         {
-            if (dialogueTextControl != null && dialogueTextControl.IsTyping)
+            if (ActiveTextControl != null && ActiveTextControl.IsTyping)
             {
                 // 如果還在打字，瞬間顯示全部
-                dialogueTextControl.SkipTypewriter();
+                ActiveTextControl.SkipTypewriter();
             }
             else
             {
@@ -317,7 +332,7 @@ public class DialogueManager : MonoBehaviour
         return rows;
     }
 
-    // 判斷某個 Tag 的所有載入節點中，是否包含任何以 _Decision 結尾的節點
+    // 判斷某個 Tag 的所有載入節點中，是否包含 any 以 _Decision 結尾的節點
     private bool HasDecisionNode(string tag)
     {
         if (string.IsNullOrEmpty(tag)) return false;
@@ -366,19 +381,30 @@ public class DialogueManager : MonoBehaviour
             Debug.Log($"[DialogueManager] 觸發電話選擇控制 (NodeID: {nodeId})，等待玩家輸入手機按鍵 1 (掛斷), 2 (轉接) 或 3 (繼續)");
         }
 
+        // 如果當前是選項節點 (IsChoice == 1)，我們只展示選項面板，不切換對話框與清空文字！
+        if (currentNode.IsChoice == 1)
+        {
+            // 執行可能的效果
+            ExecuteEffect(currentNode.EffectType, currentNode.EffectTarget);
+            
+            // 立即顯示選項 (不用等待打字，因為這不是台詞，是選項)
+            ShowChoices();
+            return; // 直接返回，不切換對話框，不清空前一個 NPC 的對話文字！
+        }
+
         // 1. 更新 UI
         nameText.text = currentNode.Character;
         
-        // 確保對話框開啟
-        if (dialogueBox != null) dialogueBox.SetActive(true);
+        // 依據說話者角色自動切換對話框背景 (NPC / 玩家)
+        UpdateDialogueBoxVisibility(currentNode.Character);
 
-        // 動態開啟角色 3D 物件：當說話的角色不是玩家且不為空白時，才開啟該電話 Tag 對應的角色物件
+        // 動態開啟角色物件：當說話的角色不是玩家且不為空白時，開啟該電話 Tag 或角色名字對應的物件
         if (!string.IsNullOrEmpty(currentNode.Character) && currentNode.Character != playerCharacterName)
         {
             if (currentCallerIndex < callerTags.Count)
             {
                 string currentTag = callerTags[currentCallerIndex];
-                ShowCharacterByTag(currentTag);
+                ShowCharacterByTag(currentTag, currentNode.Character);
             }
         }
 
@@ -388,11 +414,21 @@ public class DialogueManager : MonoBehaviour
         // 2. 執行效果
         ExecuteEffect(currentNode.EffectType, currentNode.EffectTarget);
 
-        // 3. 開始打字機效果 (交給你的 TextControl 處理)
-        if (dialogueTextControl != null)
+        // 3. 開始打字機效果 (交給對應的 TextControl 處理)
+        bool isPlayer = (currentNode.Character == playerCharacterName);
+        TextControl targetTextControl = (isPlayer && dialogueTextControlUser != null) ? dialogueTextControlUser : dialogueTextControl;
+        TextControl otherTextControl = (targetTextControl == dialogueTextControlUser) ? dialogueTextControl : dialogueTextControlUser;
+
+        if (otherTextControl != null)
         {
-            dialogueTextControl.gameObject.SetActive(true);
-            dialogueTextControl.SetText(currentNode.TextContent);
+            otherTextControl.ClearText();
+            otherTextControl.gameObject.SetActive(false);
+        }
+
+        if (targetTextControl != null)
+        {
+            targetTextControl.gameObject.SetActive(true);
+            targetTextControl.SetText(currentNode.TextContent);
         }
     }
 
@@ -408,36 +444,63 @@ public class DialogueManager : MonoBehaviour
         if (phoneDown != null) phoneDown.SetActive(!isPickedUp);
     }
 
+    // --- 對話框背景顯示控制 ---
+    private void UpdateDialogueBoxVisibility(string characterName)
+    {
+        bool isPlayer = (characterName == playerCharacterName);
+
+        if (dialogueBox != null) dialogueBox.SetActive(!isPlayer);
+        if (dialogueBoxUser != null) dialogueBoxUser.SetActive(isPlayer);
+    }
+
     // --- 角色顯示控制 ---
     private void HideAllCharacters()
     {
         if (charactersParent == null) return;
 
-        // 如果目前正在跑延遲隱藏，先取消它
-        CancelInvoke(nameof(DisableAllCharacterObjects));
+        // 如果目前正在跑倒放協程，先停止它
+        if (reversePlayCoroutine != null)
+        {
+            StopCoroutine(reversePlayCoroutine);
+            reversePlayCoroutine = null;
+        }
 
         // 如果有 Timeline 且在啟用狀態，執行倒放漸隱
         if (characterDirector != null && characterDirector.gameObject.activeInHierarchy)
         {
-            characterDirector.time = characterDirector.duration; // 定位至最尾端
-            if (characterDirector.playableGraph.IsValid())
-            {
-                var rootPlayable = characterDirector.playableGraph.GetRootPlayable(0);
-                if (rootPlayable.IsValid())
-                {
-                    rootPlayable.SetSpeed(-1.0); // 倒放速度
-                }
-            }
-            characterDirector.Play();
-
-            // 延遲關閉子物件，等漸隱動畫播完後真正 SetActive(false)
-            Invoke(nameof(DisableAllCharacterObjects), (float)characterDirector.duration);
+            reversePlayCoroutine = StartCoroutine(ReversePlayRoutine());
         }
         else
         {
             // 若沒有 Timeline，直接立即隱藏
             DisableAllCharacterObjects();
         }
+    }
+
+    private IEnumerator ReversePlayRoutine()
+    {
+        if (characterDirector != null)
+        {
+            characterDirector.Pause(); // 暫停預設的正向播放
+            
+            // 如果當前時間已經在起點或小於等於0.001秒，則從終點開始倒放
+            float elapsed = (float)characterDirector.time;
+            if (elapsed <= 0.001f)
+            {
+                elapsed = (float)characterDirector.duration;
+            }
+
+            while (elapsed > 0)
+            {
+                elapsed -= Time.deltaTime;
+                characterDirector.time = Mathf.Max(0, elapsed);
+                characterDirector.Evaluate(); // 強制更新該時間點的屬性（如透明度）
+                yield return null;
+            }
+        }
+
+        reversePlayCoroutine = null;
+        DisableAllCharacterObjects();
     }
 
     private void DisableAllCharacterObjects()
@@ -449,21 +512,54 @@ public class DialogueManager : MonoBehaviour
         }
     }
 
-    private void ShowCharacterByTag(string tag)
+    private void ShowCharacterByTag(string tag, string characterName)
     {
         if (charactersParent == null) return;
 
-        // 當要顯示新角色時，如果前一個角色正在執行「漸隱延遲隱藏」，必須立即取消它
-        CancelInvoke(nameof(DisableAllCharacterObjects));
+        // 確保父物件本身是啟用的
+        charactersParent.gameObject.SetActive(true);
+
+        // 當要顯示新角色時，如果正在執行漸隱協程，必須立即停止它
+        if (reversePlayCoroutine != null)
+        {
+            StopCoroutine(reversePlayCoroutine);
+            reversePlayCoroutine = null;
+        }
 
         bool needFadeIn = false;
+        int childCount = charactersParent.childCount;
 
-        foreach (Transform child in charactersParent)
+        for (int i = 0; i < childCount; i++)
         {
-            if (child.name == tag)
+            Transform child = charactersParent.GetChild(i);
+            
+            // 匹配邏輯：
+            // 1. 如果只有一個子物件，直接無條件匹配成功！
+            // 2. 否則進行名字雙重模糊匹配（支持完全一致或雙向包含關係，不區分大小寫）
+            bool isMatch = false;
+            if (childCount == 1)
             {
-                // 如果角色原本是隱藏的，代表需要觸發漸顯
-                if (!child.gameObject.activeSelf)
+                isMatch = true;
+            }
+            else
+            {
+                string childNameLower = child.name.ToLower();
+                string tagLower = tag.ToLower();
+                string charNameLower = string.IsNullOrEmpty(characterName) ? "" : characterName.ToLower();
+
+                isMatch = childNameLower == tagLower || 
+                          childNameLower.Contains(tagLower) || 
+                          tagLower.Contains(childNameLower) ||
+                          (!string.IsNullOrEmpty(charNameLower) && 
+                           (childNameLower == charNameLower || 
+                            childNameLower.Contains(charNameLower) || 
+                            charNameLower.Contains(childNameLower)));
+            }
+
+            if (isMatch)
+            {
+                // 如果角色原本是隱藏的，或者是剛接通新電話，代表需要觸發漸顯
+                if (!child.gameObject.activeSelf || isNewCallJustAnswered)
                 {
                     child.gameObject.SetActive(true);
                     needFadeIn = true;
@@ -478,17 +574,13 @@ public class DialogueManager : MonoBehaviour
         // 執行 Timeline 正向漸顯
         if (needFadeIn && characterDirector != null)
         {
+            characterDirector.gameObject.SetActive(true); // 確保 Timeline 播放器物件是啟用的
             characterDirector.time = 0; // 回到最起點
-            if (characterDirector.playableGraph.IsValid())
-            {
-                var rootPlayable = characterDirector.playableGraph.GetRootPlayable(0);
-                if (rootPlayable.IsValid())
-                {
-                    rootPlayable.SetSpeed(1.0); // 確保是正向播放速度
-                }
-            }
             characterDirector.Play();
         }
+
+        // 重置新接通標記
+        isNewCallJustAnswered = false;
     }
 
     // --- 通話結束與換人處理 ---
@@ -515,12 +607,15 @@ public class DialogueManager : MonoBehaviour
 
         currentNode = null;
         if (dialogueTextControl != null) dialogueTextControl.ClearText();
+        if (dialogueTextControlUser != null) dialogueTextControlUser.ClearText();
         if (nameText != null) nameText.text = "";
         if (choicePanel != null) choicePanel.SetActive(false);
         
         // 電話掛斷，隱藏對話框與文字
         if (dialogueBox != null) dialogueBox.SetActive(false);
+        if (dialogueBoxUser != null) dialogueBoxUser.SetActive(false);
         if (dialogueTextControl != null) dialogueTextControl.gameObject.SetActive(false);
+        if (dialogueTextControlUser != null) dialogueTextControlUser.gameObject.SetActive(false);
         
         // 電話掛斷，隱藏畫面上的角色
         HideAllCharacters();
@@ -557,6 +652,7 @@ public class DialogueManager : MonoBehaviour
 
             currentPhoneState = PhoneState.Talking;
             isInitialCallAction = false; // 預設為 false，由 PlayNode 動態判斷是否開啟決策
+            isNewCallJustAnswered = true; // 標記為剛接通的電話
             Debug.Log("[DialogueManager] 玩家已接聽電話！");
 
             // 播放電話拿起音效
@@ -575,7 +671,7 @@ public class DialogueManager : MonoBehaviour
             }
             
             // 開啟對話框與文字 (PlayNode 會自動開啟對應的，此處做防呆開啟)
-            if (dialogueTextControl != null) dialogueTextControl.gameObject.SetActive(true);
+            if (ActiveTextControl != null) ActiveTextControl.gameObject.SetActive(true);
 
             PlayNode(callerStartNodes[currentCallerIndex]);
             return;
@@ -648,9 +744,9 @@ public class DialogueManager : MonoBehaviour
         // 處理手機直接按 Call (傳來 NEXT 訊號)，當作按空白鍵推進劇情
         if (number == "NEXT")
         {
-            if (dialogueTextControl != null && dialogueTextControl.IsTyping)
+            if (ActiveTextControl != null && ActiveTextControl.IsTyping)
             {
-                dialogueTextControl.SkipTypewriter();
+                ActiveTextControl.SkipTypewriter();
             }
             else
             {
@@ -661,70 +757,24 @@ public class DialogueManager : MonoBehaviour
             return;
         }
 
-        // === 處理三大初始選項 (剛接通聽完第一句話時) ===
+        // === 處理初始選擇控制 (剛接通聽完第一句話時) ===
         if (isInitialCallAction)
         {
             // 確保打字結束後才允許玩家輸入選項，避免玩家提早按
-            if (dialogueTextControl != null && dialogueTextControl.IsTyping) return;
+            if (ActiveTextControl != null && ActiveTextControl.IsTyping) return;
             
-            if (number == "1" || number == "2" || number == "3")
+            // 用戶希望原先的數字 1, 2, 3 功能先移除，並改為按下手機 "1" 時直接進行「繼續收聽」
+            if (number == "1")
             {
-                isInitialCallAction = false; // 接收到正確指令，解除初始等待狀態
+                isInitialCallAction = false; // 接收到指令，解除等待狀態
                 
-                if (number == "1") // 1. 掛斷
+                // 繼續收聽：跳轉到對應的繼續台詞 NodeID (例如 Tag 是 "Mom"，則尋找 "Mom_Continue" 或 "Mom_continue")
+                string continueNodeId = callerTags[currentCallerIndex] + "_Continue";
+                if (!dialogueDatabase.ContainsKey(continueNodeId))
                 {
-                    // 使用 Tag 來尋找對應的被掛斷台詞 NodeID (例如 Tag 是 "Mom"，則尋找 "Mom_HangUp")
-                    string tag = callerTags[currentCallerIndex];
-                    string targetNodeId = tag + "_HangUp";
-                    if (!dialogueDatabase.ContainsKey(targetNodeId))
-                    {
-                        targetNodeId = tag + "_HangUp";
-                    }
-                    
-                    // 掛斷時：關閉 PickUp，開啟 down
-                    UpdatePhoneVisuals(false);
-
-                    // 通知手機端掛斷
-                    if (PhoneConnectionManager.Instance != null)
-                    {
-                        PhoneConnectionManager.Instance.SendSignalToPhone("HANGUP");
-                    }
-                    
-                    PlayNode(targetNodeId);
+                    continueNodeId = callerTags[currentCallerIndex] + "_continue";
                 }
-                else if (number == "2") // 2. 轉接
-                {
-                    string transferNodeId = callerTags[currentCallerIndex] + "_Transfer";
-                    
-                    // 如果 CSV 劇本中已經包含轉接起始節點，直接播放它 (避免重複播放)
-                    if (dialogueDatabase.ContainsKey(transferNodeId))
-                    {
-                        PlayNode(transferNodeId);
-                    }
-                    else
-                    {
-                        // 創建玩家轉接台詞的臨時節點
-                        DialogueNode playerNode = new DialogueNode();
-                        playerNode.Character = playerCharacterName;
-                        playerNode.TextContent = "我先幫你轉接到心理醫師。";
-                        playerNode.NextID = transferNodeId;
-                        
-                        if (!dialogueDatabase.ContainsKey("TEMP_TRANSFER")) dialogueDatabase.Add("TEMP_TRANSFER", playerNode);
-                        else dialogueDatabase["TEMP_TRANSFER"] = playerNode;
-                            
-                        PlayNode("TEMP_TRANSFER");
-                    }
-                }
-                else if (number == "3") // 3. 繼續收聽
-                {
-                    // 繼續收聽：跳轉到對應的繼續台詞 NodeID (例如 Tag 是 "Mom"，則尋找 "Mom_Continue" 或 "Mom_continue")
-                    string continueNodeId = callerTags[currentCallerIndex] + "_Continue";
-                    if (!dialogueDatabase.ContainsKey(continueNodeId))
-                    {
-                        continueNodeId = callerTags[currentCallerIndex] + "_continue";
-                    }
-                    PlayNode(continueNodeId);
-                }
+                PlayNode(continueNodeId);
             }
             return;
         }
@@ -764,7 +814,7 @@ public class DialogueManager : MonoBehaviour
         {
             case "PlaySound":
                 Debug.Log($"播放音效: {target}");
-                // AudioManager.PlaySound(target);
+                AudioManager.PlaySound(target);
                 break;
             case "Shake":
                 Debug.Log($"震動目標: {target}");
