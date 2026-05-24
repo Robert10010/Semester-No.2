@@ -113,6 +113,15 @@ public class DialogueManager : MonoBehaviour
     public PlayableDirector endingDirector;
     private bool isEndingTriggered = false; // 標記是否已觸發結局流程
 
+    [Header("結局玩法統計數據 (核心邏輯)")]
+    private int completedPeopleCount = 0;  // 已成功完成對話的角色數量
+    private int ruleViolationsCount = 0;   // 違反教學指南的累計次數
+
+    // 當前這通電話已透露的標籤統計 (跨句子累加)
+    private bool currentCallHasAt = false;
+    private bool currentCallHasHash = false;
+    private bool currentCallHasAnd = false;
+
     private TextControl ActiveTextControl
     {
         get
@@ -179,6 +188,11 @@ public class DialogueManager : MonoBehaviour
         isFirstFadeOut = true;
         isInitialBookOpening = false; // 重設開場手冊標記
         isEndingTriggered = false;    // 重設結局標記
+        completedPeopleCount = 0;     // 重置完成人數
+        ruleViolationsCount = 0;      // 重置違反次數
+        currentCallHasAt = false;     // 重置標籤統計
+        currentCallHasHash = false;
+        currentCallHasAnd = false;
         if (endingDirector != null)
         {
             endingDirector.gameObject.SetActive(false);
@@ -279,6 +293,11 @@ public class DialogueManager : MonoBehaviour
 
     private void TriggerNextCall()
     {
+        // 撥打新的一通電話前，清空當前電話已透露的標籤統計
+        currentCallHasAt = false;
+        currentCallHasHash = false;
+        currentCallHasAnd = false;
+
         if (currentCallerIndex < callerStartNodes.Count)
         {
             currentPhoneState = PhoneState.Ringing;
@@ -617,6 +636,14 @@ public class DialogueManager : MonoBehaviour
 
         currentNode = dialogueDatabase[nodeId];
 
+        // 只要這句對話中出現了標籤，就將其累加記錄到這通電話中
+        if (currentNode != null)
+        {
+            if (currentNode.TextContent.Contains("@")) currentCallHasAt = true;
+            if (currentNode.TextContent.Contains("#")) currentCallHasHash = true;
+            if (currentNode.TextContent.Contains("&")) currentCallHasAnd = true;
+        }
+
         // 判斷是否為決策控制節點：
         // 1. NodeID 明確以 _Decision 結尾 (新邏輯，如 C1_Decision)
         // 2. 或者是該通話的起點節點，且該劇本 Tag 中「沒有任何以 _Decision 結尾的節點」(向下相容舊邏輯)
@@ -684,7 +711,10 @@ public class DialogueManager : MonoBehaviour
         if (targetTextControl != null)
         {
             targetTextControl.gameObject.SetActive(true);
-            targetTextControl.SetText(currentNode.TextContent);
+            
+            // 動態處理劇本關鍵字標籤，轉化為 TextMeshPro 富文本紅色標籤，醒目突出
+            string formattedText = FormatRichText(currentNode.TextContent);
+            targetTextControl.SetText(formattedText);
         }
     }
 
@@ -902,6 +932,10 @@ public class DialogueManager : MonoBehaviour
     {
         if (currentPhoneState == PhoneState.Idle) return; // 避免重複觸發
 
+        // 成功處理完與一個角色的對話，累計完成人數
+        completedPeopleCount++;
+        Debug.Log($"[DialogueManager] 成功完成與一個角色的對話。當前累計完成人數: {completedPeopleCount}");
+
         currentPhoneState = PhoneState.Idle;
         isHangingUp = false; // 重置掛斷狀態
         
@@ -1024,6 +1058,12 @@ public class DialogueManager : MonoBehaviour
                 return;
             }
 
+            // 審查掛斷決策是否違反教學指南
+            if (isInitialCallAction)
+            {
+                CheckRuleViolation("HANGUP");
+            }
+
             // 掛斷時：關閉 PickUp，開啟 down
             UpdatePhoneVisuals(false);
 
@@ -1057,6 +1097,11 @@ public class DialogueManager : MonoBehaviour
         // === 處理特別指令：輸入 "000" 進行轉接 ===
         if (trimmedNumber == "000" && currentPhoneState == PhoneState.Talking)
         {
+            // 審查轉接決策是否違反教學指南
+            if (isInitialCallAction)
+            {
+                CheckRuleViolation("000");
+            }
             isInitialCallAction = false; // 解除等待選項狀態
 
             string transferNodeId = callerTags[currentCallerIndex] + "_Transfer";
@@ -1119,6 +1164,8 @@ public class DialogueManager : MonoBehaviour
             // 用戶希望原先的數字 1, 2, 3 功能先移除，並改為按下手機 "1" 時直接進行「繼續收聽」
             if (trimmedNumber == "1")
             {
+                // 審查繼續收聽決策是否違反教學指南
+                CheckRuleViolation("1");
                 isInitialCallAction = false; // 接收到指令，解除等待狀態
                 
                 // 繼續收聽：跳轉到對應的繼續台詞 NodeID (例如 Tag 是 "Mom"，則尋找 "Mom_Continue" 或 "Mom_continue")
@@ -1223,6 +1270,9 @@ public class DialogueManager : MonoBehaviour
         isTimerRunning = false;
         isTimeUp = false;
 
+        // 觸發結局前，計算並判定結局類型，將結局對話存入 PlayerPrefs
+        DetermineEnding();
+
         Debug.Log("[DialogueManager] 倒計時結束，觸發結局演出流程！");
 
         // 確保鈴聲與通話全部停止，放下電話話筒
@@ -1262,5 +1312,102 @@ public class DialogueManager : MonoBehaviour
             Debug.Log("[DialogueManager] EndingTimeline 播放結束，正在載入結局場景 EndingScenes...");
             SceneManager.LoadScene("EndingScenes");
         }
+    }
+
+    // --- 新增：結局判定核心邏輯 ---
+    private void DetermineEnding()
+    {
+        // 1. 優先判定 Fired 辭退結局 (完成 4 人以下 或 違反教學指南 4 次以上)
+        if (completedPeopleCount <= 4 || ruleViolationsCount >= 4)
+        {
+            PlayerPrefs.SetString("EndingType", "Fired");
+            if (completedPeopleCount <= 4)
+            {
+                PlayerPrefs.SetString("EndingLine1", "你因為效率過於低下，被公司辭退");
+            }
+            else
+            {
+                PlayerPrefs.SetString("EndingLine1", "你因為多次違反教學指南，被公司辭退");
+            }
+            PlayerPrefs.SetString("EndingLine2", "失去了工作該怎麼過日子呢");
+            PlayerPrefs.SetString("EndingLine3", "");
+            Debug.Log($"[DialogueManager] 結局判定：Fired 辭退結局 (完成人數: {completedPeopleCount}, 違反次數: {ruleViolationsCount})");
+        }
+        // 2. 其次判定 AngryBoss 上司生氣結局 (完成 6 人以下 或 違反教學指南 2 次以上)
+        else if (completedPeopleCount <= 6 || ruleViolationsCount >= 2)
+        {
+            PlayerPrefs.SetString("EndingType", "AngryBoss");
+            PlayerPrefs.SetString("EndingLine1", "你今天的效率有點低，被上司罵了一頓");
+            PlayerPrefs.SetString("EndingLine2", "明天要記得好好加油");
+            PlayerPrefs.SetString("EndingLine3", "");
+            Debug.Log($"[DialogueManager] 結局判定：AngryBoss 上司生氣結局 (完成人數: {completedPeopleCount}, 違反次數: {ruleViolationsCount})");
+        }
+        // 3. 最後判定 Increase 優秀結局 (完成 6 人以上 並且 違反教學指南 2 次以下)
+        else
+        {
+            PlayerPrefs.SetString("EndingType", "Increase");
+            PlayerPrefs.SetString("EndingLine1", "你今天的表現很棒");
+            PlayerPrefs.SetString("EndingLine2", "世界因為有你在而變得更加美好了");
+            PlayerPrefs.SetString("EndingLine3", "明天請繼續加油");
+            Debug.Log($"[DialogueManager] 結局判定：Increase 優秀結局 (完成人數: {completedPeopleCount}, 違反次數: {ruleViolationsCount})");
+        }
+
+        // 同步儲存統計數據，方便結局場景展示詳細數據
+        PlayerPrefs.SetInt("CompletedPeopleCount", completedPeopleCount);
+        PlayerPrefs.SetInt("RuleViolationsCount", ruleViolationsCount);
+        PlayerPrefs.Save();
+    }
+
+    // --- 新增：劇本標籤自動化審查與解析 ---
+    private void CheckRuleViolation(string playerChoice)
+    {
+        if (currentNode == null) return;
+
+        // 計算整通電話到目前為止，所透露過的所有 @(地點), #(方式), &(動機) 標籤種類數
+        int tagCount = 0;
+        if (currentCallHasAt) tagCount++;
+        if (currentCallHasHash) tagCount++;
+        if (currentCallHasAnd) tagCount++;
+        
+        string correctChoice = "";
+        if (tagCount == 3)
+        {
+            correctChoice = "000";      // 三個都有，玩家應該轉接 (000)
+        }
+        else if (tagCount == 1 || tagCount == 2)
+        {
+            correctChoice = "1";        // 只有一或兩個，玩家應該繼續收聽 (1)
+        }
+        else
+        {
+            correctChoice = "HANGUP";   // 沒有任何標籤，玩家應該掛斷 (HANGUP)
+        }
+
+        if (playerChoice != correctChoice)
+        {
+            ruleViolationsCount++;
+            Debug.LogWarning($"[DialogueManager] ⚠️ 玩家違反教學指南！整通電話累計標籤數: {tagCount} (正確選擇: {correctChoice})，但玩家選擇了: {playerChoice}。累計違反次數: {ruleViolationsCount}，對話內容: \"{currentNode.TextContent}\"");
+        }
+        else
+        {
+            Debug.Log($"[DialogueManager] ✅ 玩家操作符合教學指南。選擇: {playerChoice}，累計違反次數: {ruleViolationsCount}");
+        }
+    }
+
+    // --- 新增：將劇本自訂 @{文字} #{文字} &{文字} 標籤格式化為 TextMeshPro 紅色富文本 (不顯示 @#& 符號與大括號) ---
+    private string FormatRichText(string text)
+    {
+        if (string.IsNullOrEmpty(text)) return text;
+
+        // 1. 替換 @{地點} 為 <color=red>地點</color> (不要顯示 @ 符號本身)
+        text = Regex.Replace(text, @"@\{([^{}]+)\}", @"<color=red>$1</color>");
+
+        // 2. 替換 #{自殺方式} 為 <color=red>自殺方式</color> (不要顯示 # 符號本身)
+        text = Regex.Replace(text, @"#\{([^{}]+)\}", @"<color=red>$1</color>");
+
+        // 3. 替換 &{明確動機} 為 <color=red>明確動機</color> (不要顯示 & 符號本身)
+        text = Regex.Replace(text, @"&\{([^{}]+)\}", @"<color=red>$1</color>");
+
+        return text;
     }
 }
