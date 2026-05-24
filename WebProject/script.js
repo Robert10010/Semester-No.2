@@ -84,19 +84,19 @@ function sendToPHP(number) {
     .then(data => {
         console.log("Server response: ", data);
         if(navigator.vibrate) {
-            // 如果手機支援震動器，傳送成功時震動一下
-            navigator.vibrate(200); 
+            navigator.vibrate(100); // 震動一下 (縮短為 100ms 更清爽)
         }
         
+        // 瞬間顯示 Signal Sent 並清空輸入，大幅提升連按推進的響應手感
+        statusIndicator.innerText = "Signal Sent";
+        statusIndicator.classList.remove("calling");
+        currentNumber = "";
+        updateDisplay();
+        
+        // 僅停留 300 毫秒以作視覺確認，隨即立刻返回 Ready 狀態，迎接下一次操作！
         setTimeout(() => {
-            statusIndicator.innerText = "Signal Sent";
-            statusIndicator.classList.remove("calling");
-            currentNumber = "";
-            setTimeout(() => {
-                updateDisplay();
-                statusIndicator.innerText = "Ready";
-            }, 2000);
-        }, 800); // 模擬稍微停頓的撥號感
+            statusIndicator.innerText = "Ready";
+        }, 300);
     })
     .catch(err => {
         console.error("Error connecting to PHP:", err);

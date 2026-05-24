@@ -65,6 +65,16 @@ public class DialogueManager : MonoBehaviour
     public GameObject choicePanel;              // 裝載選項文字的父物件 (平時隱藏)
     public TMP_Text[] choiceTexts;              // 三個選項的文字元件 (索引 0~2 對應 1~3)
 
+    [Header("決策提示文字設定")]
+    [Tooltip("Dialogue_Box 中用於提示玩家可以選擇的 TMP Text 元件 (決策節點打字結束後才出現)")]
+    public TMP_Text decisionPromptText;         // 決策提示文字元件
+    [Tooltip("決策提示文字內容 (例如：請選擇你的處理方式...)")]
+    public string decisionPromptContent = "請選擇你的處理方式..."; // 提示文字內容
+    [Tooltip("決策提示文字的每秒出現字數")]
+    public float decisionPromptCharsPerSecond = 15f; // 提示打字速度
+    private Coroutine _decisionPromptCoroutine;      // 決策提示文字打字協程
+    private bool isDecisionPromptTyping = false;     // 是否正在顯示決策提示文字
+
     // 儲存所有劇本的字典 (Dictionary)，用 NodeID 來快速尋找對話
     private Dictionary<string, DialogueNode> dialogueDatabase = new Dictionary<string, DialogueNode>();
     
@@ -456,8 +466,34 @@ public class DialogueManager : MonoBehaviour
         {
             if (ActiveTextControl != null && ActiveTextControl.IsTyping)
             {
-                // 如果還在打字，瞬間顯示全部
+                // 如果還在打字，瞬間顯示全部，並同時立刻顯示決策提示文字（如果有）
                 ActiveTextControl.SkipTypewriter();
+                // 若有決策提示協程等待中，也一起跳過
+                if (_decisionPromptCoroutine != null)
+                {
+                    StopCoroutine(_decisionPromptCoroutine);
+                    _decisionPromptCoroutine = null;
+                }
+                // 如果是決策節點，跳過後直接顯示完整提示文字
+                if (isInitialCallAction && decisionPromptText != null && !string.IsNullOrEmpty(decisionPromptContent))
+                {
+                    decisionPromptText.gameObject.SetActive(true);
+                    decisionPromptText.text = decisionPromptContent;
+                    decisionPromptText.maxVisibleCharacters = decisionPromptContent.Length;
+                    isDecisionPromptTyping = false;
+                }
+            }
+            else if (isDecisionPromptTyping)
+            {
+                // 決策提示文字還在打字中，瞬間顯示完整提示文字
+                if (_decisionPromptCoroutine != null)
+                {
+                    StopCoroutine(_decisionPromptCoroutine);
+                    _decisionPromptCoroutine = null;
+                }
+                decisionPromptText.text = decisionPromptContent;
+                decisionPromptText.maxVisibleCharacters = decisionPromptContent.Length;
+                isDecisionPromptTyping = false;
             }
             else
             {
@@ -627,6 +663,9 @@ public class DialogueManager : MonoBehaviour
     {
         if (choicePanel != null) choicePanel.SetActive(false); // 確保每次播放新句子時先隱藏選項
 
+        // 每次播放新節點時，立即隱藏並停止決策提示文字
+        HideDecisionPrompt();
+
         if (string.IsNullOrEmpty(nodeId) || nodeId.ToLower() == "end" || !dialogueDatabase.ContainsKey(nodeId))
         {
             Debug.Log("[DialogueManager] 劇情節點結束，準備切換下一通電話！");
@@ -716,11 +755,66 @@ public class DialogueManager : MonoBehaviour
             string formattedText = FormatRichText(currentNode.TextContent);
             targetTextControl.SetText(formattedText);
         }
+
+        // 如果這是決策節點，等待主要打字結束後再顯示決策提示文字
+        if (isDecisionNode && decisionPromptText != null)
+        {
+            _decisionPromptCoroutine = StartCoroutine(ShowDecisionPromptAfterTyping(targetTextControl));
+        }
     }
 
     void GoToNextNode()
     {
         PlayNode(currentNode.NextID);
+    }
+
+    // --- 決策提示文字顯示協程 ---
+    private IEnumerator ShowDecisionPromptAfterTyping(TextControl mainTextControl)
+    {
+        // 等待主要對話打字機完成
+        while (mainTextControl != null && mainTextControl.IsTyping)
+        {
+            yield return null;
+        }
+
+        // 主要打字結束，開始顯示決策提示文字（打字機效果）
+        if (decisionPromptText != null && !string.IsNullOrEmpty(decisionPromptContent))
+        {
+            decisionPromptText.gameObject.SetActive(true);
+            decisionPromptText.text = decisionPromptContent;
+            decisionPromptText.ForceMeshUpdate();
+            decisionPromptText.maxVisibleCharacters = 0;
+            isDecisionPromptTyping = true;
+
+            float delay = 1f / Mathf.Max(1f, decisionPromptCharsPerSecond);
+            int totalChars = decisionPromptText.textInfo.characterCount;
+
+            for (int i = 0; i < totalChars; i++)
+            {
+                decisionPromptText.maxVisibleCharacters++;
+                yield return new WaitForSeconds(delay);
+            }
+
+            isDecisionPromptTyping = false;
+        }
+
+        _decisionPromptCoroutine = null;
+    }
+
+    // --- 隱藏並停止決策提示文字 ---
+    private void HideDecisionPrompt()
+    {
+        if (_decisionPromptCoroutine != null)
+        {
+            StopCoroutine(_decisionPromptCoroutine);
+            _decisionPromptCoroutine = null;
+        }
+        isDecisionPromptTyping = false;
+        if (decisionPromptText != null)
+        {
+            decisionPromptText.gameObject.SetActive(false);
+            decisionPromptText.text = string.Empty;
+        }
     }
 
     // --- 電話視覺狀態控制 ---
