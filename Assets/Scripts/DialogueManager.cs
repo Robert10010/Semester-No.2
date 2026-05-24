@@ -72,6 +72,7 @@ public class DialogueManager : MonoBehaviour
 
     private bool isNewCallJustAnswered = false; // 標記是否為剛接通的第一句話，以強制播放漸顯 Timeline
     private Coroutine reversePlayCoroutine;     // 控制漸隱（倒放）的協程
+    private bool isHangingUp = false;           // 標記目前是否正處於掛斷對話播放流程中，用以禁止顯示 NPC 2D 角色
 
     [Header("遊戲時間限制設定")]
     [Tooltip("遊戲限時時間 (秒)，預設 180 秒 (3 分鐘)")]
@@ -80,6 +81,7 @@ public class DialogueManager : MonoBehaviour
     private bool isTimerRunning = false;
     private bool isTimeUp = false;
     private bool isFirstFadeOut = true; // 標記是否為遊戲開始的第一次 Fadeout
+    private bool isInitialBookOpening = false; // 標記是否為遊戲剛開場的教學手冊播放，以在手冊關閉後啟動遊戲
 
     [Header("電視影片設定")]
     [Tooltip("播電視影片的 VideoPlayer 組件")]
@@ -91,6 +93,20 @@ public class DialogueManager : MonoBehaviour
     [Tooltip("電視影片漸暗消失的時間 (秒)")]
     public float tvFadeDuration = 0.5f;
     private Coroutine tvFadeCoroutine; // 電視漸暗協程
+
+    [Header("教學手冊設定")]
+    [Tooltip("教學手冊的 PlayableDirector (tech_bookTimeline)")]
+    public PlayableDirector techBookDirector;
+    [Tooltip("教學手冊 UI 物件 (例如 playcanvas 中的 book image 或 UI tech_book)，若未指定會自動搜尋")]
+    public GameObject techBookUIObject;
+    [Tooltip("第一個停止點的幀數 (預設 150)")]
+    public float bookStopFrame1 = 150f;
+    [Tooltip("第二個停止點/總幀數的幀數 (預設 300)")]
+    public float bookStopFrame2 = 300f;
+    [Tooltip("Timeline 的幀率 (預設 60fps)")]
+    public float bookTimelineFps = 60f;
+
+    private int bookPlayState = 0; // 0 = 關閉/閒置, 1 = 正在播放前150幀, 2 = 暫停在150幀, 3 = 正在播放後續150幀
 
     private TextControl ActiveTextControl
     {
@@ -119,6 +135,31 @@ public class DialogueManager : MonoBehaviour
     {
         LoadCSV();
         UpdatePhoneVisuals(false); // 預設關閉 PickUp，開啟 down
+
+        // 自動配置打字音效保底機制
+        if (dialogueTextControl != null && string.IsNullOrEmpty(dialogueTextControl.TypingSoundName))
+        {
+            dialogueTextControl.TypingSoundName = "Dialogue_sound_1";
+        }
+        if (dialogueTextControlUser != null && string.IsNullOrEmpty(dialogueTextControlUser.TypingSoundName))
+        {
+            dialogueTextControlUser.TypingSoundName = "Dialogue_sound_2";
+        }
+
+        // 自動保底搜尋教學手冊 UI 物件
+        if (techBookUIObject == null && techBookDirector != null)
+        {
+            GameObject foundBook = GameObject.Find("tech_book");
+            if (foundBook != null && foundBook != techBookDirector.gameObject)
+            {
+                techBookUIObject = foundBook;
+            }
+            else
+            {
+                foundBook = GameObject.Find("book image");
+                if (foundBook != null) techBookUIObject = foundBook;
+            }
+        }
     }
 
     // 提供給 GameFlowController 呼叫的方法
@@ -131,6 +172,7 @@ public class DialogueManager : MonoBehaviour
         isTimerRunning = false;
         isTimeUp = false;
         isFirstFadeOut = true;
+        isInitialBookOpening = false; // 重設開場手冊標記
         
         // 遊戲一開始，開啟電視噪聲影片的播放並將透明度重設為 1
         if (tvFadeCoroutine != null)
@@ -171,7 +213,58 @@ public class DialogueManager : MonoBehaviour
         if (dialogueTextControl != null) dialogueTextControl.gameObject.SetActive(false);
         if (dialogueTextControlUser != null) dialogueTextControlUser.gameObject.SetActive(false);
         
+        // 【開場手冊優化】移除原先直接的 TriggerNextCall()，改由開場手冊關閉後觸發！
+    }
+
+    private void StartGameOfficially()
+    {
+        isTimerRunning = true;
+        gameTimer = 0f;
+        isTimeUp = false;
+        Debug.Log("[DialogueManager] 開場教學手冊關閉，正式開始遊戲，啟動計時器並響起第一通電話！");
         TriggerNextCall();
+    }
+
+    private void ToggleTechBook(bool active)
+    {
+        if (techBookDirector == null) return;
+
+        techBookDirector.gameObject.SetActive(active);
+
+        // 1. 自動控制 Timeline 綁定的所有 UI/動畫物件的啟用狀態 (只在開啟時強制設為 true，關閉時絕對不設為 false，使其永久保持可見)
+        if (active && techBookDirector.playableAsset != null)
+        {
+            foreach (var binding in techBookDirector.playableAsset.outputs)
+            {
+                var boundObject = techBookDirector.GetGenericBinding(binding.sourceObject);
+                if (boundObject != null)
+                {
+                    if (boundObject is Animator animator) animator.gameObject.SetActive(true);
+                    else if (boundObject is GameObject go) go.SetActive(true);
+                    else if (boundObject is Component comp) comp.gameObject.SetActive(true);
+                }
+            }
+        }
+
+        // 2. 控制手動/自動搜尋指定的 UI 物件 (只在開啟時強制設為 true，關閉時絕對不設為 false，使其永久保持可見)
+        if (active && techBookUIObject != null)
+        {
+            techBookUIObject.SetActive(true);
+        }
+
+        // 3. 切換播放狀態
+        if (active)
+        {
+            techBookDirector.time = 0;
+            techBookDirector.Evaluate();
+            techBookDirector.Play();
+            bookPlayState = 1;
+        }
+        else
+        {
+            techBookDirector.Pause();
+            bookPlayState = 0;
+        }
     }
 
     private void TriggerNextCall()
@@ -202,6 +295,72 @@ public class DialogueManager : MonoBehaviour
 
     void Update()
     {
+        // 宣告滑鼠與空白鍵狀態於 Update 頂部，完美解決重複宣告 CS0136 編譯錯誤！
+        bool clicked = Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame;
+        bool spacePressed = Keyboard.current != null && Keyboard.current.spaceKey.wasPressedThisFrame;
+
+        // 監控教學手冊 Timeline 播放狀態與幀數
+        if (techBookDirector != null && techBookDirector.gameObject.activeInHierarchy)
+        {
+            double currentFrame = techBookDirector.time * bookTimelineFps;
+
+            if (bookPlayState == 1)
+            {
+                if (currentFrame >= bookStopFrame1)
+                {
+                    techBookDirector.Pause();
+                    techBookDirector.time = bookStopFrame1 / bookTimelineFps;
+                    techBookDirector.Evaluate();
+                    bookPlayState = 2;
+                    Debug.Log($"[DialogueManager] 教學手冊已到達第 {bookStopFrame1} 幀，暫停播放，等待玩家按下 CALL/滑鼠/空白鍵。");
+                }
+            }
+            else if (bookPlayState == 3)
+            {
+                bool isFinished = currentFrame >= bookStopFrame2 || 
+                                   techBookDirector.time >= techBookDirector.duration ||
+                                   techBookDirector.state != PlayState.Playing;
+
+                if (isFinished)
+                {
+                    ToggleTechBook(false); // 關閉手冊
+                    Debug.Log("[DialogueManager] 教學手冊播放完畢，關閉手冊。");
+
+                    // 如果是開場教學手冊，玩家關閉手冊後才正式開始遊戲與計時！
+                    if (isInitialBookOpening)
+                    {
+                        isInitialBookOpening = false;
+                        StartGameOfficially();
+                    }
+                }
+            }
+        }
+
+        // 在任何對話狀態下，都允許鍵盤 0 鍵開啟教學手冊
+        if (Keyboard.current != null)
+        {
+            if (Keyboard.current.digit0Key.wasPressedThisFrame || Keyboard.current.numpad0Key.wasPressedThisFrame)
+            {
+                OnPhoneInput("0");
+                return;
+            }
+        }
+
+        // 在任何對話狀態下，如果教學手冊處於暫停狀態 (bookPlayState == 2)，攔截滑鼠與空白鍵以推進手冊，而不是推進劇本對話
+        if (bookPlayState == 2)
+        {
+            if (clicked || spacePressed)
+            {
+                if (techBookDirector != null)
+                {
+                    techBookDirector.Play();
+                    bookPlayState = 3;
+                    Debug.Log("[DialogueManager] [全狀態攔截] 玩家在手冊暫停時按下滑鼠/空白鍵，繼續播放教學手冊後續幀數。");
+                }
+                return; // 攔截，絕對不執行後續對話劇情邏輯
+            }
+        }
+
         // 累加遊戲計時
         if (isTimerRunning && !isTimeUp)
         {
@@ -264,9 +423,6 @@ public class DialogueManager : MonoBehaviour
                 return;
             }
         }
-
-        bool clicked = Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame;
-        bool spacePressed = Keyboard.current != null && Keyboard.current.spaceKey.wasPressedThisFrame;
 
         // 點擊滑鼠左鍵 或 按下空白鍵 推進劇情
         if (clicked || spacePressed)
@@ -493,7 +649,7 @@ public class DialogueManager : MonoBehaviour
         // 動態開啟角色物件：當說話的角色不是玩家且不為空白時，開啟該電話 Tag 或角色名字對應的物件
         if (!string.IsNullOrEmpty(currentNode.Character) && currentNode.Character != playerCharacterName)
         {
-            if (currentCallerIndex < callerTags.Count)
+            if (currentCallerIndex < callerTags.Count && !isHangingUp)
             {
                 string currentTag = callerTags[currentCallerIndex];
                 ShowCharacterByTag(currentTag, currentNode.Character);
@@ -614,14 +770,21 @@ public class DialogueManager : MonoBehaviour
             child.gameObject.SetActive(false);
         }
 
-        // 如果是遊戲開始的第一次 Fadeout timeline 播放完畢，正式開始啟動遊戲時間限制！
+        // 如果是遊戲開始的第一次 Fadeout timeline 播放完畢，立即自動開啟開場教學手冊！
         if (isFirstFadeOut)
         {
             isFirstFadeOut = false;
-            isTimerRunning = true;
-            gameTimer = 0f;
-            isTimeUp = false;
-            Debug.Log("[DialogueManager] 關卡開場 Fadeout 播放完畢，開始 3 分鐘遊戲限時計時！");
+            if (techBookDirector != null)
+            {
+                ToggleTechBook(true);
+                isInitialBookOpening = true;
+                Debug.Log("[DialogueManager] 開場 Fadeout 播放完畢，立即自動開啟教學手冊，播放前 150 幀。");
+            }
+            else
+            {
+                // 若無手冊，直接開始遊戲
+                StartGameOfficially();
+            }
         }
     }
 
@@ -732,6 +895,7 @@ public class DialogueManager : MonoBehaviour
         if (currentPhoneState == PhoneState.Idle) return; // 避免重複觸發
 
         currentPhoneState = PhoneState.Idle;
+        isHangingUp = false; // 重置掛斷狀態
         
         // 確保掛斷時狀態為放下
         UpdatePhoneVisuals(false);
@@ -794,8 +958,19 @@ public class DialogueManager : MonoBehaviour
 
     void OnPhoneInput(string number)
     {
+        if (string.IsNullOrEmpty(number)) return;
+        string trimmedNumber = number.Trim();
+
+        // === 處理特別指令：輸入 "0" 開啟教學手冊 (最優先，無論在任何遊戲階段或對話狀態) ===
+        if (trimmedNumber == "0")
+        {
+            ToggleTechBook(true);
+            Debug.Log("[DialogueManager] 玩家輸入 0，開啟教學手冊，播放前 150 幀。");
+            return;
+        }
+
         // === 處理真實電話介面傳來的接聽與掛斷訊號 ===
-        if (number == "ANSWER" && currentPhoneState == PhoneState.Ringing)
+        if (trimmedNumber == "ANSWER" && currentPhoneState == PhoneState.Ringing)
         {
             lastAnswerTime = Time.time;
 
@@ -828,7 +1003,7 @@ public class DialogueManager : MonoBehaviour
             PlayNode(callerStartNodes[currentCallerIndex]);
             return;
         }
-        else if (number == "HANGUP" && currentPhoneState == PhoneState.Talking)
+        else if (trimmedNumber == "HANGUP" && currentPhoneState == PhoneState.Talking)
         {
             // 防呆：如果剛接聽不到 1 秒就收到掛斷訊號，可能是硬體開關彈跳，忽略它
             if (Time.time - lastAnswerTime < 1.0f)
@@ -852,6 +1027,8 @@ public class DialogueManager : MonoBehaviour
 
             Debug.Log("[DialogueManager] 玩家按下實體掛斷鍵，播放掛斷反應台詞！");
             isInitialCallAction = false; // 解除等待選項狀態
+            isHangingUp = true;          // 標記處於掛斷流程中
+            HideAllCharacters();         // 立即隱藏/漸隱角色
             
             // 檢查 CSV 中是否有這句掛斷台詞，有的話就播放，沒有就直接結束
             if (dialogueDatabase.ContainsKey(targetNodeId))
@@ -866,7 +1043,7 @@ public class DialogueManager : MonoBehaviour
         }
 
         // === 處理特別指令：輸入 "000" 進行轉接 ===
-        if (number == "000" && currentPhoneState == PhoneState.Talking)
+        if (trimmedNumber == "000" && currentPhoneState == PhoneState.Talking)
         {
             isInitialCallAction = false; // 解除等待選項狀態
 
@@ -894,8 +1071,20 @@ public class DialogueManager : MonoBehaviour
         }
 
         // 處理手機直接按 Call (傳來 NEXT 訊號)，當作按空白鍵推進劇情
-        if (number == "NEXT")
+        if (trimmedNumber == "NEXT")
         {
+            // 如果教學手冊正處於第 150 幀的暫停狀態，CALL 鍵將繼續播放手冊，並攔截對話推進
+            if (bookPlayState == 2)
+            {
+                if (techBookDirector != null)
+                {
+                    techBookDirector.Play();
+                    bookPlayState = 3;
+                    Debug.Log("[DialogueManager] 玩家按下 CALL 鍵，繼續播放教學手冊後續幀數。");
+                }
+                return; // 攔截，不前進主線對話
+            }
+
             if (ActiveTextControl != null && ActiveTextControl.IsTyping)
             {
                 ActiveTextControl.SkipTypewriter();
@@ -916,7 +1105,7 @@ public class DialogueManager : MonoBehaviour
             if (ActiveTextControl != null && ActiveTextControl.IsTyping) return;
             
             // 用戶希望原先的數字 1, 2, 3 功能先移除，並改為按下手機 "1" 時直接進行「繼續收聽」
-            if (number == "1")
+            if (trimmedNumber == "1")
             {
                 isInitialCallAction = false; // 接收到指令，解除等待狀態
                 
@@ -938,15 +1127,15 @@ public class DialogueManager : MonoBehaviour
 
         string nextNodeId = "";
 
-        if (number == "1" && !string.IsNullOrEmpty(currentNode.Choice1Next))
+        if (trimmedNumber == "1" && !string.IsNullOrEmpty(currentNode.Choice1Next))
         {
             nextNodeId = currentNode.Choice1Next;
         }
-        else if (number == "2" && !string.IsNullOrEmpty(currentNode.Choice2Next))
+        else if (trimmedNumber == "2" && !string.IsNullOrEmpty(currentNode.Choice2Next))
         {
             nextNodeId = currentNode.Choice2Next;
         }
-        else if (number == "3" && !string.IsNullOrEmpty(currentNode.Choice3Next))
+        else if (trimmedNumber == "3" && !string.IsNullOrEmpty(currentNode.Choice3Next))
         {
             nextNodeId = currentNode.Choice3Next;
         }

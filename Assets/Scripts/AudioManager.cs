@@ -128,6 +128,18 @@ public class AudioManager : MonoBehaviour
     }
 
     /// <summary>
+    /// 供外部獲取已註冊音效的 AudioClip
+    /// </summary>
+    public AudioClip GetSFXClip(string soundName)
+    {
+        if (sfxDictionary.TryGetValue(soundName, out AudioClip clip))
+        {
+            return clip;
+        }
+        return null;
+    }
+
+    /// <summary>
     /// 播放音效 (SFX) — 支援同時播放多個音效
     /// </summary>
     /// <param name="soundName">音效的識別名稱</param>

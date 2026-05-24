@@ -17,8 +17,22 @@ namespace InteractiveNovelGames.Typography.TextControl
         private int _currentVisibleCharacterIndex;
         private Coroutine _typingCoroutine;  
         
+        private AudioSource _audioSource;
+        private AudioClip _typingClip;
+        private Coroutine _soundCoroutine;
+
         // 新增：讓外部判斷是否還在打字
         public bool IsTyping => _typingCoroutine != null;
+
+        [Header("打字音效")]
+        [Tooltip("打字時播放的音效名稱 (在 AudioManager 中設定的名稱)")]
+        [SerializeField] private string typingSoundName = "";
+
+        public string TypingSoundName
+        {
+            get => typingSoundName;
+            set => typingSoundName = value;
+        }
 
         private WaitForSeconds _simpleDeleay;
         private WaitForSeconds _interpunctuationDelay;
@@ -50,6 +64,17 @@ namespace InteractiveNovelGames.Typography.TextControl
             if(_typingCoroutine != null)
                 StopCoroutine(_typingCoroutine);
 
+            if (_soundCoroutine != null)
+            {
+                StopCoroutine(_soundCoroutine);
+                _soundCoroutine = null;
+            }
+
+            if (_audioSource != null)
+            {
+                _audioSource.Stop();
+            }
+
             _textBox.text = Text;
             _textBox.ForceMeshUpdate(); // 強制更新 TextMeshPro 資訊，否則 characterCount 會抓到上一句的長度
             _textBox.maxVisibleCharacters = 0;
@@ -57,6 +82,22 @@ namespace InteractiveNovelGames.Typography.TextControl
             _currentVisibleCharacterIndex = 0;
             
             _typingCoroutine = StartCoroutine(TyperCoroutine());
+
+            // 啟動音效播放協程
+            if (_audioSource == null)
+            {
+                _audioSource = GetComponent<AudioSource>();
+                if (_audioSource == null) _audioSource = gameObject.AddComponent<AudioSource>();
+                _audioSource.playOnAwake = false;
+            }
+            if (!string.IsNullOrEmpty(typingSoundName) && AudioManager.Instance != null)
+            {
+                _typingClip = AudioManager.Instance.GetSFXClip(typingSoundName);
+                if (_typingClip != null)
+                {
+                    _soundCoroutine = StartCoroutine(PlayTypingSoundsRoutine());
+                }
+            }
         }
 
         // 新增：讓外部呼叫跳過打字機
@@ -76,6 +117,16 @@ namespace InteractiveNovelGames.Typography.TextControl
                     _textBox.maxVisibleCharacters = _textBox.textInfo.characterCount;
                 }
             }
+
+            if (_soundCoroutine != null)
+            {
+                StopCoroutine(_soundCoroutine);
+                _soundCoroutine = null;
+            }
+            if (_audioSource != null)
+            {
+                _audioSource.Stop();
+            }
         }
 
         /// <summary>
@@ -92,6 +143,16 @@ namespace InteractiveNovelGames.Typography.TextControl
             {
                 StopCoroutine(_typingCoroutine);
                 _typingCoroutine = null;
+            }
+
+            if (_soundCoroutine != null)
+            {
+                StopCoroutine(_soundCoroutine);
+                _soundCoroutine = null;
+            }
+            if (_audioSource != null)
+            {
+                _audioSource.Stop();
             }
 
             if (_textBox != null)
@@ -122,6 +183,25 @@ namespace InteractiveNovelGames.Typography.TextControl
             
             // 打字結束，將協程設為 null
             _typingCoroutine = null;
+        }
+
+        private IEnumerator PlayTypingSoundsRoutine()
+        {
+            if (_audioSource == null || _typingClip == null) yield break;
+
+            _audioSource.clip = _typingClip;
+            _audioSource.loop = false; // 一個一個播放
+
+            while (IsTyping)
+            {
+                if (!_audioSource.isPlaying)
+                {
+                    _audioSource.Play();
+                }
+                yield return null;
+            }
+
+            _audioSource.Stop();
         }
     }
 }

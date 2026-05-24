@@ -41,7 +41,7 @@ try {
 if (isset($_POST['phone_number'])) {
     $number = trim($_POST['phone_number']);
 
-    if (empty($number)) {
+    if ($number === '') {
         echo "Error: Empty number.";
         exit;
     }
