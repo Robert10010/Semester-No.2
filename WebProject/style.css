@@ -2,6 +2,7 @@
     box-sizing: border-box;
     margin: 0;
     padding: 0;
+    touch-action: manipulation; /* 徹底停用所有元素的雙擊縮放（包括按鈕與按鍵），並消除 300ms 點擊延遲 */
 }
 
 body {

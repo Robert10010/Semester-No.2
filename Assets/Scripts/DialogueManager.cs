@@ -108,6 +108,11 @@ public class DialogueManager : MonoBehaviour
 
     private int bookPlayState = 0; // 0 = 關閉/閒置, 1 = 正在播放前150幀, 2 = 暫停在150幀, 3 = 正在播放後續150幀
 
+    [Header("結局 Timeline 設定")]
+    [Tooltip("結局演出的 PlayableDirector (EndingTimeline)，可在 Inspector 拖入")]
+    public PlayableDirector endingDirector;
+    private bool isEndingTriggered = false; // 標記是否已觸發結局流程
+
     private TextControl ActiveTextControl
     {
         get
@@ -173,6 +178,11 @@ public class DialogueManager : MonoBehaviour
         isTimeUp = false;
         isFirstFadeOut = true;
         isInitialBookOpening = false; // 重設開場手冊標記
+        isEndingTriggered = false;    // 重設結局標記
+        if (endingDirector != null)
+        {
+            endingDirector.gameObject.SetActive(false);
+        }
         
         // 遊戲一開始，開啟電視噪聲影片的播放並將透明度重設為 1
         if (tvFadeCoroutine != null)
@@ -373,12 +383,10 @@ public class DialogueManager : MonoBehaviour
             }
         }
 
-        // 當計時結束，且當前不在通話中（沒有在 Talking），立刻跳轉結局 EndingScenes
+        // 當計時結束，且當前不在通話中（沒有在 Talking），立刻觸發結局
         if (isTimeUp && currentPhoneState != PhoneState.Talking)
         {
-            isTimeUp = false; // 防重複觸發
-            Debug.Log("[DialogueManager] 限時已到且當前無通話，正在跳轉至結局 EndingScenes...");
-            SceneManager.LoadScene("EndingScenes");
+            TriggerEnding();
             return;
         }
 
@@ -927,12 +935,10 @@ public class DialogueManager : MonoBehaviour
         // 電話掛斷，隱藏畫面上的角色
         HideAllCharacters();
         
-        // 檢查限時是否已到。若已到，立即跳轉結局場景，不再排程下一通電話！
+        // 檢查限時是否已到。若已到，立刻觸發結局，不再排程下一通電話！
         if (isTimeUp)
         {
-            isTimeUp = false; // 防重複觸發
-            Debug.Log("[DialogueManager] 當下通話已結束且時間已到，正在載入結局場景 EndingScenes...");
-            SceneManager.LoadScene("EndingScenes");
+            TriggerEnding();
             return;
         }
         
@@ -960,6 +966,12 @@ public class DialogueManager : MonoBehaviour
     {
         if (string.IsNullOrEmpty(number)) return;
         string trimmedNumber = number.Trim();
+
+        // 處理帶有底線時間戳記的訊號 (例如 NEXT_1716543452 或 0_1716543452)
+        if (trimmedNumber.Contains("_"))
+        {
+            trimmedNumber = trimmedNumber.Split('_')[0];
+        }
 
         // === 處理特別指令：輸入 "0" 開啟教學手冊 (最優先，無論在任何遊戲階段或對話狀態) ===
         if (trimmedNumber == "0")
@@ -1201,5 +1213,54 @@ public class DialogueManager : MonoBehaviour
         }
 
         tvFadeCoroutine = null;
+    }
+
+    // --- 新增：結局演出與場景載入控制 ---
+    private void TriggerEnding()
+    {
+        if (isEndingTriggered) return;
+        isEndingTriggered = true;
+        isTimerRunning = false;
+        isTimeUp = false;
+
+        Debug.Log("[DialogueManager] 倒計時結束，觸發結局演出流程！");
+
+        // 確保鈴聲與通話全部停止，放下電話話筒
+        if (AudioManager.Instance != null) AudioManager.Instance.StopLoopingSFX();
+        UpdatePhoneVisuals(false);
+        HideAllCharacters();
+
+        // 隱藏對話框與清空打字
+        if (dialogueBox != null) dialogueBox.SetActive(false);
+        if (dialogueBoxUser != null) dialogueBoxUser.SetActive(false);
+        if (dialogueTextControl != null) dialogueTextControl.ClearText();
+        if (dialogueTextControlUser != null) dialogueTextControlUser.ClearText();
+
+        if (endingDirector != null)
+        {
+            Debug.Log("[DialogueManager] 開始播放 EndingTimeline...");
+            endingDirector.gameObject.SetActive(true);
+            endingDirector.time = 0;
+            endingDirector.Evaluate();
+            
+            // 訂閱 Timeline 播放結束事件
+            endingDirector.stopped += OnEndingTimelineStopped;
+            endingDirector.Play();
+        }
+        else
+        {
+            Debug.LogWarning("[DialogueManager] 未配置 endingDirector，將直接載入 EndingScenes 場景！");
+            SceneManager.LoadScene("EndingScenes");
+        }
+    }
+
+    private void OnEndingTimelineStopped(PlayableDirector director)
+    {
+        if (director == endingDirector)
+        {
+            endingDirector.stopped -= OnEndingTimelineStopped; // 取消訂閱防記憶體洩漏
+            Debug.Log("[DialogueManager] EndingTimeline 播放結束，正在載入結局場景 EndingScenes...");
+            SceneManager.LoadScene("EndingScenes");
+        }
     }
 }
