@@ -115,6 +115,10 @@ public class DialogueManager : MonoBehaviour
     public float bookStopFrame2 = 300f;
     [Tooltip("Timeline 的幀率 (預設 60fps)")]
     public float bookTimelineFps = 60f;
+    [Tooltip("教學手冊打開/拿起音效名稱 (AudioManager 中設定的名稱)")]
+    public string techBookPickUpSFXName = "Book_open";
+    [Tooltip("教學手冊關閉/放下音效名稱 (AudioManager 中設定的名稱)")]
+    public string techBookPutDownSFXName = "Book_close";
 
     private int bookPlayState = 0; // 0 = 關閉/閒置, 1 = 正在播放前150幀, 2 = 暫停在150幀, 3 = 正在播放後續150幀
 
@@ -122,6 +126,14 @@ public class DialogueManager : MonoBehaviour
     [Tooltip("結局演出的 PlayableDirector (EndingTimeline)，可在 Inspector 拖入")]
     public PlayableDirector endingDirector;
     private bool isEndingTriggered = false; // 標記是否已觸發結局流程
+
+    [Header("特殊新聞事件設定")]
+    [Tooltip("新聞播報畫面物件 (例如 TV_news)")]
+    public GameObject tvNewsObject;
+    [Tooltip("新聞畫面播放持續時間 (秒)，若為 0 則嘗試自動等待 VideoPlayer 播放結束")]
+    public float tvNewsDuration = 10f;
+    private bool firstCallWasHungUp = false; // 記錄第一通電話是否被玩家掛斷
+    private bool isPlayingNews = false;      // 是否正在播放新聞畫面
 
     [Header("結局玩法統計數據 (核心邏輯)")]
     private int completedPeopleCount = 0;  // 已成功完成對話的角色數量
@@ -203,6 +215,12 @@ public class DialogueManager : MonoBehaviour
         currentCallHasAt = false;     // 重置標籤統計
         currentCallHasHash = false;
         currentCallHasAnd = false;
+        firstCallWasHungUp = false;   // 重置新聞事件標記
+        isPlayingNews = false;        // 重置新聞播放狀態
+        if (tvNewsObject != null)
+        {
+            tvNewsObject.SetActive(false); // 預設關閉新聞物件
+        }
         if (endingDirector != null)
         {
             endingDirector.gameObject.SetActive(false);
@@ -264,6 +282,16 @@ public class DialogueManager : MonoBehaviour
         if (techBookDirector == null) return;
 
         techBookDirector.gameObject.SetActive(active);
+
+        // 播放開啟或關閉手冊音效
+        if (AudioManager.Instance != null)
+        {
+            string sfxName = active ? techBookPickUpSFXName : techBookPutDownSFXName;
+            if (!string.IsNullOrEmpty(sfxName))
+            {
+                AudioManager.PlaySound(sfxName);
+            }
+        }
 
         // 1. 自動控制 Timeline 綁定的所有 UI/動畫物件的啟用狀態 (只在開啟時強制設為 true，關閉時絕對不設為 false，使其永久保持可見)
         if (active && techBookDirector.playableAsset != null)
@@ -334,6 +362,9 @@ public class DialogueManager : MonoBehaviour
 
     void Update()
     {
+        // 如果正在播放新聞，阻擋任何 Update 中的推進操作
+        if (isPlayingNews) return;
+
         // 宣告滑鼠與空白鍵狀態於 Update 頂部，完美解決重複宣告 CS0136 編譯錯誤！
         bool clicked = Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame;
         bool spacePressed = Keyboard.current != null && Keyboard.current.spaceKey.wasPressedThisFrame;
@@ -1071,8 +1102,18 @@ public class DialogueManager : MonoBehaviour
         }
         
         CancelInvoke(nameof(TriggerNextCall)); // 防呆：確保不會重複排程下一通電話
-        currentCallerIndex++;
-        Invoke(nameof(TriggerNextCall), 2.0f); // 延遲 2 秒後撥打下一通
+        
+        // 判斷特殊新聞事件：如果第一通電話被掛斷了，且現在是第二通電話（currentCallerIndex == 1）結束
+        if (firstCallWasHungUp && currentCallerIndex == 1 && tvNewsObject != null)
+        {
+            currentCallerIndex++; // 照常增加索引
+            StartCoroutine(PlayTVNewsRoutine());
+        }
+        else
+        {
+            currentCallerIndex++;
+            Invoke(nameof(TriggerNextCall), 2.0f); // 延遲 2 秒後撥打下一通
+        }
     }
 
     // --- 選項處理 ---
@@ -1156,6 +1197,13 @@ public class DialogueManager : MonoBehaviour
             if (isInitialCallAction)
             {
                 CheckRuleViolation("HANGUP");
+            }
+
+            // 記錄如果是第一通電話 (索引 0) 被掛斷了
+            if (currentCallerIndex == 0)
+            {
+                firstCallWasHungUp = true;
+                Debug.Log("[DialogueManager] 特殊事件記錄：第一通電話已被掛斷。");
             }
 
             // 掛斷時：關閉 PickUp，開啟 down
@@ -1503,5 +1551,87 @@ public class DialogueManager : MonoBehaviour
         text = Regex.Replace(text, @"&\{([^{}]+)\}", @"<color=red>$1</color>");
 
         return text;
+    }
+
+    // --- 新增特殊事件：播放電視新聞畫面協程 ---
+    private IEnumerator PlayTVNewsRoutine()
+    {
+        isPlayingNews = true;
+        currentPhoneState = PhoneState.Idle; // 確保電話狀態是閒置的，避免在新聞期間意外響鈴
+        
+        Debug.Log("[DialogueManager] 開始播放新聞播報畫面 (TV_news)...");
+        
+        // 暫停原本的電視噪聲背景，防止畫面或聲音衝突
+        if (tvVideoPlayer != null)
+        {
+            tvVideoPlayer.Pause();
+        }
+        // 確保電視螢幕的 CanvasGroup 是完全顯示的，防止新聞影片（若渲染在同一個電視螢幕上）因透明度為 0 而看不見
+        if (tvVideoCanvasGroup != null)
+        {
+            tvVideoCanvasGroup.alpha = 1f;
+        }
+
+        // 啟用新聞物件
+        tvNewsObject.SetActive(true);
+
+        // 獲取新聞物件上的 VideoPlayer 並播放
+        VideoPlayer newsVideo = tvNewsObject.GetComponent<VideoPlayer>();
+        if (newsVideo == null)
+        {
+            newsVideo = tvNewsObject.GetComponentInChildren<VideoPlayer>();
+        }
+
+        if (newsVideo != null)
+        {
+            newsVideo.isLooping = false;
+            newsVideo.Play();
+        }
+
+        // 決定等待時間
+        if (tvNewsDuration > 0)
+        {
+            yield return new WaitForSeconds(tvNewsDuration);
+        }
+        else if (newsVideo != null)
+        {
+            // 自動等待影片播放完畢
+            float safetyTimer = 0f;
+            // 先等它開始播放
+            while (!newsVideo.isPlaying && safetyTimer < 3f)
+            {
+                safetyTimer += Time.deltaTime;
+                yield return null;
+            }
+            
+            safetyTimer = 0f;
+            while (newsVideo.isPlaying && safetyTimer < 30f)
+            {
+                safetyTimer += Time.deltaTime;
+                yield return null;
+            }
+        }
+        else
+        {
+            yield return new WaitForSeconds(5f); // 保底等 5 秒
+        }
+
+        Debug.Log("[DialogueManager] 新聞播報結束，關閉新聞畫面。");
+
+        // 關閉新聞畫面
+        tvNewsObject.SetActive(false);
+
+        // 恢復原本的電視噪聲背景
+        if (tvVideoPlayer != null)
+        {
+            if (tvVideoCanvasGroup != null) tvVideoCanvasGroup.alpha = 1f;
+            tvVideoPlayer.gameObject.SetActive(true);
+            tvVideoPlayer.Play();
+        }
+
+        isPlayingNews = false;
+
+        // 播完後立刻開始下一通電話 (也就是第三通電話)
+        TriggerNextCall();
     }
 }

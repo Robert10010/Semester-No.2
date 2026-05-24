@@ -1510,6 +1510,10 @@ MonoBehaviour:
     clip: {fileID: 8300000, guid: fb61ac411a88f96488e37720f5ee23b7, type: 3}
   - name: Dialogue_sound_2
     clip: {fileID: 8300000, guid: b1600a1ccfb25a64aba70cdb48a147c6, type: 3}
+  - name: Book_open
+    clip: {fileID: 8300000, guid: dfeff40a9c2303743bd0d4bd1e747fb9, type: 3}
+  - name: Book_close
+    clip: {fileID: 8300000, guid: cf91e37e44840f746806f57d3a3e2df7, type: 3}
   backgroundMusics: []
   bgmSource: {fileID: 698705743}
   sfxSource: {fileID: 1084347582}
@@ -2586,7 +2590,7 @@ MonoBehaviour:
   m_fontMaterials: []
   m_fontColor32:
     serializedVersion: 2
-    rgba: 4289008128
+    rgba: 4294967295
   m_fontColor: {r: 1, g: 1, b: 1, a: 1}
   m_enableVertexGradient: 0
   m_colorMode: 3
@@ -2664,7 +2668,7 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 542080665}
-  m_Enabled: 1
+  m_Enabled: 0
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: e8e971b332aca17488d7d57642c361b9, type: 3}
   m_Name: 
@@ -2673,6 +2677,7 @@ MonoBehaviour:
   typingSoundName: Dialogue_sound_1
   charactersPerSecond: 20
   interpunctuationDelay: 0.5
+  typeOnEnable: 0
 --- !u!1 &558783489
 GameObject:
   m_ObjectHideFlags: 0
@@ -2941,11 +2946,11 @@ VideoPlayer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 664180183}
   m_Enabled: 1
-  m_VideoClip: {fileID: 0}
+  m_VideoClip: {fileID: 32900000, guid: d04099b36721abf47b227a654c4d7dcd, type: 3}
   m_TargetCameraAlpha: 1
   m_TargetCamera3DLayout: 0
   m_TargetCamera: {fileID: 0}
-  m_TargetTexture: {fileID: 0}
+  m_TargetTexture: {fileID: 8400000, guid: c8bbf705504e88742860507e61b60c0c, type: 2}
   m_TimeReference: 0
   m_TargetMaterialRenderer: {fileID: 0}
   m_TargetMaterialProperty: <noninit>
@@ -2963,7 +2968,7 @@ VideoPlayer:
   m_EnabledAudioTracks: 01
   m_DirectAudioMutes: 00
   m_ControlledAudioTrackCount: 1
-  m_PlayOnAwake: 1
+  m_PlayOnAwake: 0
   m_SkipOnDrop: 1
   m_Looping: 0
   m_WaitForFirstFrame: 1
@@ -3366,7 +3371,7 @@ GameObject:
   - component: {fileID: 826018725}
   - component: {fileID: 826018724}
   m_Layer: 5
-  m_Name: Text (TMP)
+  m_Name: FadeOutText
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -3480,6 +3485,7 @@ MonoBehaviour:
   typingSoundName: 
   charactersPerSecond: 20
   interpunctuationDelay: 0.5
+  typeOnEnable: 1
 --- !u!222 &826018726
 CanvasRenderer:
   m_ObjectHideFlags: 0
@@ -4430,8 +4436,8 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
-  m_AnchoredPosition: {x: 169, y: 74}
-  m_SizeDelta: {x: 233.6, y: 221.9}
+  m_AnchoredPosition: {x: 169, y: 53.375}
+  m_SizeDelta: {x: 233.6, y: 203.15}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &1243265749
 MonoBehaviour:
@@ -4992,7 +4998,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_text: "\u4E3B\u8996\u89BA"
+  m_text: "\u81EA\u6BBA\u9632\u6CBB\u516C\u53F8"
   m_isRightToLeft: 0
   m_fontAsset: {fileID: 11400000, guid: d2bc5d1e5f7692d4ea59b9d1597d883c, type: 2}
   m_sharedMaterial: {fileID: 6147832477309550230, guid: d2bc5d1e5f7692d4ea59b9d1597d883c, type: 2}
@@ -5468,7 +5474,11 @@ MonoBehaviour:
   bookStopFrame1: 150
   bookStopFrame2: 300
   bookTimelineFps: 60
+  techBookPickUpSFXName: Book_open
+  techBookPutDownSFXName: Book_close
   endingDirector: {fileID: 1579594990}
+  tvNewsObject: {fileID: 664180183}
+  tvNewsDuration: 0
 --- !u!4 &1603964493
 Transform:
   m_ObjectHideFlags: 0
@@ -5741,7 +5751,7 @@ MonoBehaviour:
   m_margin: {x: 0, y: -1.0463467, z: -62.539368, w: -55.37769}
   m_isUsingLegacyAnimationComponent: 0
   m_isVolumetricText: 0
-  m_hasFontAssetChanged: 0
+  m_hasFontAssetChanged: 1
   m_baseMaterial: {fileID: 0}
   m_maskOffset: {x: 0, y: 0, z: 0, w: 0}
 --- !u!222 &1713997722
@@ -5768,6 +5778,7 @@ MonoBehaviour:
   typingSoundName: Dialogue_sound_2
   charactersPerSecond: 20
   interpunctuationDelay: 0.5
+  typeOnEnable: 0
 --- !u!1 &1716181129
 GameObject:
   m_ObjectHideFlags: 0

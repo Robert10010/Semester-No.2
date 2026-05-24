@@ -44,11 +44,36 @@ namespace InteractiveNovelGames.Typography.TextControl
         // 標點符號集合，用於判斷停頓
         private readonly System.Collections.Generic.HashSet<char> _punctuationChars = new System.Collections.Generic.HashSet<char> { '.', ',', '!', '?', '…', ':', ';' };
 
+        [Header("啟用時自動打字")]
+        [Tooltip("如果開啟此選項，當此 UI 物件被啟用 (Active) 時，會自動將目前的文字內容套用打字機效果。適合 Timeline 的 Activation Track 啟用時使用。")]
+        [SerializeField] private bool typeOnEnable = false;
+
+        private bool _isAwakeDone = false;
+
         void Awake()
         {
             _textBox = GetComponent<TMP_Text>();
             _simpleDeleay = new WaitForSeconds(1/charactersPerSecond);
             _interpunctuationDelay = new WaitForSeconds(interpunctuationDelay);
+            _isAwakeDone = true;
+        }
+
+        void OnEnable()
+        {
+            if (typeOnEnable)
+            {
+                // 如果 Awake 還沒跑過，先手動呼叫 Awake 初始化元件參考
+                if (!_isAwakeDone)
+                {
+                    Awake();
+                }
+                
+                if (_textBox != null && !string.IsNullOrEmpty(_textBox.text))
+                {
+                    // 呼叫 SetText 開始打字機效果
+                    SetText(_textBox.text);
+                }
+            }
         }
         
         public void SetText(string Text)
