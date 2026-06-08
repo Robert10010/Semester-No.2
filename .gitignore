@@ -45,10 +45,10 @@
 # Debug symbols
 *.pdb
 
-# NuGet Packages
+# NuGet Packages (Commented out to avoid ignoring Unity Packages directory)
 *.nupkg
-**/[Pp]ackages/*
-!**/[Pp]ackages/build/
+# **/[Pp]ackages/*
+# !**/[Pp]ackages/build/
 
 # .NET build artifacts
 artifacts/

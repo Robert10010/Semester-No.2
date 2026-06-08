@@ -2,6 +2,7 @@ using UnityEngine;
 using System.Collections;
 using TMPro; // 支援 TextMeshPro
 using UnityEngine.SceneManagement; // 支援回到主場景
+using UnityEngine.InputSystem; // 支援新的 Input System
 
 /// <summary>
 /// 控制結局場景 (EndingScenes) 的 UI 顯示。
@@ -161,7 +162,9 @@ public class EndingSceneController : MonoBehaviour
         // 8. 貼心操作：打字尚未結束時，若玩家按下「空白鍵」或「滑鼠左鍵」，可瞬間顯示全部文字 (Skip 功能)
         if (!isTypingFinished && typingCoroutine != null)
         {
-            if (Input.GetKeyDown(KeyCode.Space) || Input.GetMouseButtonDown(0))
+            bool clicked = Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame;
+            bool spacePressed = Keyboard.current != null && Keyboard.current.spaceKey.wasPressedThisFrame;
+            if (spacePressed || clicked)
             {
                 StopCoroutine(typingCoroutine);
                 typingCoroutine = null;

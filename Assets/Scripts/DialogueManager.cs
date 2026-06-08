@@ -1284,6 +1284,13 @@ public class DialogueManager : MonoBehaviour
                 return; // 攔截，不前進主線對話
             }
 
+            // 安全防呆：如果目前沒有在通話中，或者當前對話節點已清空，直接忽略 NEXT 訊號
+            if (currentNode == null || currentPhoneState != PhoneState.Talking)
+            {
+                Debug.LogWarning("[DialogueManager] 忽略 NEXT 訊號，因為目前沒有正在進行的對話或通話已結束。");
+                return;
+            }
+
             if (ActiveTextControl != null && ActiveTextControl.IsTyping)
             {
                 ActiveTextControl.SkipTypewriter();
