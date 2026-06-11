@@ -365,6 +365,33 @@ public class DialogueManager : MonoBehaviour
         // 如果正在播放新聞，阻擋任何 Update 中的推進操作
         if (isPlayingNews) return;
 
+        // ===== 開發測試用快捷鍵 =====
+        if (Keyboard.current != null)
+        {
+            // Enter 鍵：模擬手機發送 START_GAME 訊號（開始遊戲）
+            // 透過 PhoneConnectionManager 的靜態事件廣播，這樣 GameFlowController 也能收到
+            if (Keyboard.current.enterKey.wasPressedThisFrame || Keyboard.current.numpadEnterKey.wasPressedThisFrame)
+            {
+                Debug.Log("[DialogueManager] 開發測試：按下 Enter 鍵，模擬 START_GAME 訊號。");
+                PhoneConnectionManager.TriggerPhoneNumber("START_GAME");
+                return;
+            }
+
+            // Backspace 鍵：根據當前電話狀態，模擬接聽 (ANSWER) 或掛斷 (HANGUP)
+            if (Keyboard.current.backspaceKey.wasPressedThisFrame)
+            {
+                if (currentPhoneState == PhoneState.Ringing)
+                {
+                    OnPhoneInput("ANSWER");
+                }
+                else if (currentPhoneState == PhoneState.Talking)
+                {
+                    OnPhoneInput("HANGUP");
+                }
+                return;
+            }
+        }
+
         // 宣告滑鼠與空白鍵狀態於 Update 頂部，完美解決重複宣告 CS0136 編譯錯誤！
         bool clicked = Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame;
         bool spacePressed = Keyboard.current != null && Keyboard.current.spaceKey.wasPressedThisFrame;
@@ -1642,26 +1669,61 @@ public class DialogueManager : MonoBehaviour
         }
     }
 
-    // --- 新增：將劇本自訂 @{文字} #{文字} &{文字} 標籤格式化為 TextMeshPro 紅色富文本 (不顯示 @#& 符號與大括號) ---
+    // --- 將劇本自訂標記格式化為 TextMeshPro 紅色富文本 ---
     private string FormatRichText(string text)
     {
         if (string.IsNullOrEmpty(text)) return text;
 
-        // 1. 替換 @{地點} 為 <color=red>地點</color> (不要顯示 @ 符號本身)
+        // 1. 替換 @{地點} 為 <color=red>地點</color>
         text = Regex.Replace(text, @"@\{([^{}]+)\}", @"<color=red>$1</color>");
 
-        // 2. 替換 #{自殺方式} 為 <color=red>自殺方式</color> (不要顯示 # 符號本身)
+        // 2. 替換 #{自殺方式} 為 <color=red>自殺方式</color>
         text = Regex.Replace(text, @"#\{([^{}]+)\}", @"<color=red>$1</color>");
 
-        // 3. 替換 &{明確動機} 為 <color=red>明確動機</color> (不要顯示 & 符號本身)
+        // 3. 替換 &{明確動機} 為 <color=red>明確動機</color>
         text = Regex.Replace(text, @"&\{([^{}]+)\}", @"<color=red>$1</color>");
 
-        // 4. 替換純大括號 {任何文字} 為 <color=red>任何文字</color> (支援無字元前綴的純大括號)
+        // 4. 替換純大括號 {任何文字} 為 <color=red>任何文字</color>
         text = Regex.Replace(text, @"\{([^{}]+)\}", @"<color=red>$1</color>");
 
-        // 5. 替換雙米字號 **任何文字** 為 <color=red>任何文字</color> (Markdown 粗體語法轉紅色)
-        text = Regex.Replace(text, @"\*\*([^*]+)\*\*", @"<color=red>$1</color>");
+        // 5. 先處理雙星號 **文字** (優先，避免與單星號衝突)
+        int safetyLimit = 100;
+        while (text.Contains("**") && safetyLimit > 0)
+        {
+            safetyLimit--;
+            int startIdx = text.IndexOf("**");
+            int endIdx = text.IndexOf("**", startIdx + 2);
+            if (endIdx == -1)
+            {
+                text = text.Remove(startIdx, 2);
+                break;
+            }
+            string innerText = text.Substring(startIdx + 2, endIdx - startIdx - 2);
+            text = text.Substring(0, startIdx)
+                 + "<color=red>" + innerText + "</color>"
+                 + text.Substring(endIdx + 2);
+        }
 
+        // 6. 再處理單星號 *文字* (CSV 劇本實際使用的格式)
+        safetyLimit = 100;
+        while (text.Contains("*") && safetyLimit > 0)
+        {
+            safetyLimit--;
+            int startIdx = text.IndexOf("*");
+            int endIdx = text.IndexOf("*", startIdx + 1);
+            if (endIdx == -1)
+            {
+                // 找不到配對的結束 *，直接移除這個孤立的 *
+                text = text.Remove(startIdx, 1);
+                break;
+            }
+            string innerText = text.Substring(startIdx + 1, endIdx - startIdx - 1);
+            text = text.Substring(0, startIdx)
+                 + "<color=red>" + innerText + "</color>"
+                 + text.Substring(endIdx + 1);
+        }
+
+        Debug.Log($"[FormatRichText] 轉換結果: {text}");
         return text;
     }
 

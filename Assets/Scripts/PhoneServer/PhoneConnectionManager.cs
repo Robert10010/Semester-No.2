@@ -29,6 +29,15 @@ public class PhoneConnectionManager : MonoBehaviour
     // 建立一個事件，當收到號碼時廣播出去
     public static event Action<string> OnPhoneNumberReceived;
 
+    /// <summary>
+    /// 供開發測試用：從外部直接觸發手機號碼事件，模擬手機端發送訊號。
+    /// </summary>
+    public static void TriggerPhoneNumber(string number)
+    {
+        Debug.Log($"[PhoneConnectionManager] 開發測試觸發：{number}");
+        OnPhoneNumberReceived?.Invoke(number);
+    }
+
     // 防重複觸發：記錄上一次處理的號碼與時間
     private string  _lastProcessedNumber = "";
     private float   _lastProcessedTime   = -999f;

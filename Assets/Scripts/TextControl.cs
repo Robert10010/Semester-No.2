@@ -100,6 +100,7 @@ namespace InteractiveNovelGames.Typography.TextControl
                 _audioSource.Stop();
             }
 
+            _textBox.richText = true; // 強制開啟富文本支援，確保 <color> 等標籤能正確渲染
             _textBox.text = Text;
             _textBox.ForceMeshUpdate(); // 強制更新 TextMeshPro 資訊，否則 characterCount 會抓到上一句的長度
             _textBox.maxVisibleCharacters = 0;
@@ -201,9 +202,25 @@ namespace InteractiveNovelGames.Typography.TextControl
 
                 // 根據字元是否為標點符號，決定等待時間
                 if (_punctuationChars.Contains(currentChar))
-                    yield return _interpunctuationDelay;
+                {
+                    // 檢查下一個字元是否也是標點（連續標點如 ...）
+                    // 如果是連續標點，只用普通速度顯示，在最後一個標點才停頓
+                    bool nextIsPunctuation = false;
+                    if (_currentVisibleCharacterIndex < textInfo.characterCount)
+                    {
+                        char nextChar = textInfo.characterInfo[_currentVisibleCharacterIndex].character;
+                        nextIsPunctuation = _punctuationChars.Contains(nextChar);
+                    }
+
+                    if (nextIsPunctuation)
+                        yield return _simpleDeleay;     // 連續標點中間：用普通速度
+                    else
+                        yield return _interpunctuationDelay; // 最後一個標點：正常停頓
+                }
                 else
+                {
                     yield return _simpleDeleay;
+                }
             }
             
             // 打字結束，將協程設為 null
