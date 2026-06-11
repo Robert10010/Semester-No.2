@@ -553,39 +553,83 @@ public class DialogueManager : MonoBehaviour
 
         // 使用更強大的自訂 CSV 解析器，支援單一儲存格內包含「真實換行」與「逗號」
         List<string[]> parsedLines = ParseCSV(csvFile.text);
+        if (parsedLines.Count == 0) return;
+
+        // 解析標題列 (Header) 以取得動態欄位索引，相容欄位被刪除或順序調整的情況
+        string[] headers = parsedLines[0];
+        int idxTag = -1, idxNodeID = -1, idxCharacter = -1, idxTextContent = -1, idxNextID = -1;
+        int idxEmotionTag = -1, idxPosition = -1, idxEffectType = -1, idxEffectTarget = -1;
+        int idxIsChoice = -1;
+        int idxC1Text = -1, idxC1Next = -1;
+        int idxC2Text = -1, idxC2Next = -1;
+        int idxC3Text = -1, idxC3Next = -1;
+
+        for (int col = 0; col < headers.Length; col++)
+        {
+            string h = headers[col].Trim().Replace(" ", "").ToLower();
+            if (h == "tag") idxTag = col;
+            else if (h == "nodeid") idxNodeID = col;
+            else if (h == "character") idxCharacter = col;
+            else if (h == "textcontent") idxTextContent = col;
+            else if (h == "nextid") idxNextID = col;
+            else if (h == "emotiontag") idxEmotionTag = col;
+            else if (h == "position") idxPosition = col;
+            else if (h == "effecttype") idxEffectType = col;
+            else if (h == "effecttarget") idxEffectTarget = col;
+            else if (h == "ischoice") idxIsChoice = col;
+            else if (h == "choice1text") idxC1Text = col;
+            else if (h == "choice1next") idxC1Next = col;
+            else if (h == "choice2text") idxC2Text = col;
+            else if (h == "choice2next") idxC2Next = col;
+            else if (h == "choice3text") idxC3Text = col;
+            else if (h == "choice3next") idxC3Next = col;
+        }
+
+        // 確保核心必備欄位存在
+        if (idxNodeID == -1 || idxTextContent == -1)
+        {
+            Debug.LogError("CSV 劇本格式錯誤：缺少 NodeID 或 TextContent 必備欄位！");
+            return;
+        }
 
         // 第一行通常是標題列 (Header)，所以從 i=1 開始讀取
         for (int i = 1; i < parsedLines.Count; i++)
         {
             string[] values = parsedLines[i];
 
-            if (values.Length >= 9) // 確保基本欄位數量正確 (現在包含了 Tag，所以是 9 個基本欄位)
+            // 確保資料行足夠容納最基本的 NodeID 與 TextContent 索引範圍
+            int maxBasicIdx = Mathf.Max(idxNodeID, idxTextContent);
+            if (values.Length > maxBasicIdx)
             {
                 DialogueNode node = new DialogueNode();
-                node.Tag = values[0];
-                node.NodeID = values[1];
-                node.Character = values[2];
-                node.EmotionTag = values[3];
-                node.Position = values[4];
+                
+                if (idxTag != -1 && idxTag < values.Length) node.Tag = values[idxTag];
+                node.NodeID = values[idxNodeID];
+                if (idxCharacter != -1 && idxCharacter < values.Length) node.Character = values[idxCharacter];
+                
+                // 自修復與填充可選屬性 (就算 CSV 沒有這些欄位，也會留空而不崩潰)
+                if (idxEmotionTag != -1 && idxEmotionTag < values.Length) node.EmotionTag = values[idxEmotionTag];
+                if (idxPosition != -1 && idxPosition < values.Length) node.Position = values[idxPosition];
+                if (idxEffectType != -1 && idxEffectType < values.Length) node.EffectType = values[idxEffectType];
+                if (idxEffectTarget != -1 && idxEffectTarget < values.Length) node.EffectTarget = values[idxEffectTarget];
                 
                 // 自訂解析器已經幫忙去除外層雙引號了，這裡只需替換字串中寫死的 \n 為真實換行
-                node.TextContent = values[5].Replace("\\n", "\n"); 
-                
-                node.NextID = values[6];
-                node.EffectType = values[7];
-                node.EffectTarget = values[8];
+                node.TextContent = values[idxTextContent].Replace("\\n", "\n"); 
+                if (idxNextID != -1 && idxNextID < values.Length) node.NextID = values[idxNextID];
 
                 // 解析新加入的分支選項欄位 (如果有填寫的話)
-                if (values.Length > 9) int.TryParse(values[9], out node.IsChoice);
-                if (values.Length > 10) node.Choice1Text = values[10];
-                if (values.Length > 11) node.Choice1Next = values[11];
-                if (values.Length > 12) node.Choice2Text = values[12];
-                if (values.Length > 13) node.Choice2Next = values[13];
-                if (values.Length > 14) node.Choice3Text = values[14];
-                if (values.Length > 15) node.Choice3Next = values[15];
+                if (idxIsChoice != -1 && idxIsChoice < values.Length && !string.IsNullOrEmpty(values[idxIsChoice]))
+                {
+                    int.TryParse(values[idxIsChoice], out node.IsChoice);
+                }
+                if (idxC1Text != -1 && idxC1Text < values.Length) node.Choice1Text = values[idxC1Text];
+                if (idxC1Next != -1 && idxC1Next < values.Length) node.Choice1Next = values[idxC1Next];
+                if (idxC2Text != -1 && idxC2Text < values.Length) node.Choice2Text = values[idxC2Text];
+                if (idxC2Next != -1 && idxC2Next < values.Length) node.Choice2Next = values[idxC2Next];
+                if (idxC3Text != -1 && idxC3Text < values.Length) node.Choice3Text = values[idxC3Text];
+                if (idxC3Next != -1 && idxC3Next < values.Length) node.Choice3Next = values[idxC3Next];
 
                 // 自動抓取：如果 Tag 欄位有填寫內容，就視為新的一通電話起點
-                // 【修復】不再強制 NodeID 必須包含 START，而是檢查這個 Tag 是否已經加入過
                 if (!string.IsNullOrEmpty(node.Tag))
                 {
                     string trimmedTag = node.Tag;
@@ -605,8 +649,15 @@ public class DialogueManager : MonoBehaviour
                     }
                 }   
 
-                // 加入字典中
-                dialogueDatabase.Add(node.NodeID, node);
+                // 加入字典中 (防重複，做覆蓋保護)
+                if (!dialogueDatabase.ContainsKey(node.NodeID))
+                {
+                    dialogueDatabase.Add(node.NodeID, node);
+                }
+                else
+                {
+                    dialogueDatabase[node.NodeID] = node;
+                }
             }
         }
         Debug.Log($"成功讀取劇本！共載入 {dialogueDatabase.Count} 句對話。");
@@ -699,6 +750,29 @@ public class DialogueManager : MonoBehaviour
 
         if (string.IsNullOrEmpty(nodeId) || nodeId.ToLower() == "end" || !dialogueDatabase.ContainsKey(nodeId))
         {
+            // 當正常對話路徑結束時，檢查是否要自動導向選擇節點 (_Continue)
+            if (currentCallerIndex < callerTags.Count)
+            {
+                string tag = callerTags[currentCallerIndex];
+                string continueNodeId = tag + "_Continue";
+                if (!dialogueDatabase.ContainsKey(continueNodeId))
+                {
+                    continueNodeId = tag + "_continue";
+                }
+
+                // 防呆迴避：如果當前節點已經是選擇節點或選擇分支後續，就代表通話確實該結束了，不要再次導向 _Continue
+                bool isAlreadyInChoicePath = currentNode != null && 
+                                            (currentNode.NodeID.Contains("_Continue") || 
+                                             currentNode.NodeID.Contains("_continue"));
+
+                if (dialogueDatabase.ContainsKey(continueNodeId) && !isAlreadyInChoicePath)
+                {
+                    Debug.Log($"[DialogueManager] 檢測到對話結尾且未進入選擇，自動跳轉至 {continueNodeId}");
+                    PlayNode(continueNodeId);
+                    return;
+                }
+            }
+
             Debug.Log("[DialogueManager] 劇情節點結束，準備切換下一通電話！");
             EndCurrentCallAndTriggerNext();
             return;
@@ -714,24 +788,31 @@ public class DialogueManager : MonoBehaviour
             if (currentNode.TextContent.Contains("&")) currentCallHasAnd = true;
         }
 
-        // 判斷是否為決策控制節點：
-        // 1. NodeID 明確以 _Decision 結尾 (新邏輯，如 C1_Decision)
-        // 2. 或者是該通話的起點節點，且該劇本 Tag 中「沒有任何以 _Decision 結尾的節點」(向下相容舊邏輯)
+        // 判斷是否為原先的決策控制節點：
+        // 如果是原先的 _Decision 節點，現在直接跳轉到對應的 _Continue 節點，不作攔截與等待！
+        // (移除以前將起點 START 視為決策點的向下相容，解決一接起電話就變選項的問題)
         bool isDecisionNode = nodeId.EndsWith("_Decision", StringComparison.OrdinalIgnoreCase);
-        if (!isDecisionNode && currentCallerIndex < callerTags.Count && currentCallerIndex < callerStartNodes.Count)
-        {
-            string currentTag = callerTags[currentCallerIndex];
-            bool isStartNode = (nodeId == callerStartNodes[currentCallerIndex]);
-            if (isStartNode && !HasDecisionNode(currentTag))
-            {
-                isDecisionNode = true;
-            }
-        }
 
         if (isDecisionNode)
         {
-            isInitialCallAction = true;
-            Debug.Log($"[DialogueManager] 觸發電話選擇控制 (NodeID: {nodeId})，等待玩家輸入手機按鍵 1 (掛斷), 2 (轉接) 或 3 (繼續)");
+            // 直接跳轉至對應的 _Continue 節點，不進行攔截與等待，沒有 _Transfer 與 _Decision 了
+            string continueNodeId = callerTags[currentCallerIndex] + "_Continue";
+            if (!dialogueDatabase.ContainsKey(continueNodeId))
+            {
+                continueNodeId = callerTags[currentCallerIndex] + "_continue";
+            }
+
+            if (dialogueDatabase.ContainsKey(continueNodeId))
+            {
+                Debug.Log($"[DialogueManager] 偵測到決策點 {nodeId}，已自動跳轉至對應的 {continueNodeId} 節點。");
+                PlayNode(continueNodeId);
+            }
+            else
+            {
+                Debug.LogWarning($"[DialogueManager] 找不到對應的 {continueNodeId} 節點，自動推進。");
+                GoToNextNode();
+            }
+            return;
         }
 
         // 如果當前是選項節點 (IsChoice == 1)，我們只展示選項面板，不切換對話框與清空文字！
@@ -1122,13 +1203,34 @@ public class DialogueManager : MonoBehaviour
         if (choicePanel != null) choicePanel.SetActive(true);
 
         if (choiceTexts != null && choiceTexts.Length > 0 && choiceTexts[0] != null) 
-            choiceTexts[0].text = string.IsNullOrEmpty(currentNode.Choice1Text) ? "" : $"1. {currentNode.Choice1Text}";
+        {
+            bool hasChoice1 = !string.IsNullOrEmpty(currentNode.Choice1Text);
+            choiceTexts[0].text = hasChoice1 ? $"1. {currentNode.Choice1Text}" : "";
+            if (choiceTexts[0].transform.parent != null && choiceTexts[0].transform.parent != choicePanel.transform)
+                choiceTexts[0].transform.parent.gameObject.SetActive(hasChoice1);
+            else
+                choiceTexts[0].gameObject.SetActive(hasChoice1);
+        }
             
         if (choiceTexts != null && choiceTexts.Length > 1 && choiceTexts[1] != null) 
-            choiceTexts[1].text = string.IsNullOrEmpty(currentNode.Choice2Text) ? "" : $"2. {currentNode.Choice2Text}";
+        {
+            bool hasChoice2 = !string.IsNullOrEmpty(currentNode.Choice2Text);
+            choiceTexts[1].text = hasChoice2 ? $"2. {currentNode.Choice2Text}" : "";
+            if (choiceTexts[1].transform.parent != null && choiceTexts[1].transform.parent != choicePanel.transform)
+                choiceTexts[1].transform.parent.gameObject.SetActive(hasChoice2);
+            else
+                choiceTexts[1].gameObject.SetActive(hasChoice2);
+        }
             
         if (choiceTexts != null && choiceTexts.Length > 2 && choiceTexts[2] != null) 
-            choiceTexts[2].text = string.IsNullOrEmpty(currentNode.Choice3Text) ? "" : $"3. {currentNode.Choice3Text}";
+        {
+            bool hasChoice3 = !string.IsNullOrEmpty(currentNode.Choice3Text);
+            choiceTexts[2].text = hasChoice3 ? $"3. {currentNode.Choice3Text}" : "";
+            if (choiceTexts[2].transform.parent != null && choiceTexts[2].transform.parent != choicePanel.transform)
+                choiceTexts[2].transform.parent.gameObject.SetActive(hasChoice3);
+            else
+                choiceTexts[2].gameObject.SetActive(hasChoice3);
+        }
     }
 
     void OnPhoneInput(string number)
@@ -1194,10 +1296,7 @@ public class DialogueManager : MonoBehaviour
             }
 
             // 審查掛斷決策是否違反教學指南
-            if (isInitialCallAction)
-            {
-                CheckRuleViolation("HANGUP");
-            }
+            CheckRuleViolation("HANGUP");
 
             // 記錄如果是第一通電話 (索引 0) 被掛斷了
             if (currentCallerIndex == 0)
@@ -1556,6 +1655,12 @@ public class DialogueManager : MonoBehaviour
 
         // 3. 替換 &{明確動機} 為 <color=red>明確動機</color> (不要顯示 & 符號本身)
         text = Regex.Replace(text, @"&\{([^{}]+)\}", @"<color=red>$1</color>");
+
+        // 4. 替換純大括號 {任何文字} 為 <color=red>任何文字</color> (支援無字元前綴的純大括號)
+        text = Regex.Replace(text, @"\{([^{}]+)\}", @"<color=red>$1</color>");
+
+        // 5. 替換雙米字號 **任何文字** 為 <color=red>任何文字</color> (Markdown 粗體語法轉紅色)
+        text = Regex.Replace(text, @"\*\*([^*]+)\*\*", @"<color=red>$1</color>");
 
         return text;
     }
