@@ -3,11 +3,11 @@ using UnityEngine;
 using TMPro; // 引用 TextMeshPro
 using UnityEngine.Playables;
 using UnityEngine.InputSystem;
+using UnityEngine.UI; // 引用 UnityEngine.UI 支援 Image 元件
 using InteractiveNovelGames.Typography.TextControl;
 
 /// <summary>
-/// 用於定義在遊戲流程中（如轉場、黑屏）顯示的獨立文字片段的設定。
-/// 這樣可以將相關設定（文字內容、UI元件、字型）打包在一起，方便管理。
+/// 用於定義在遊戲流程中（如轉場、黑屏）顯示的獨立文字與圖片片段的設定。
 /// </summary>
 [System.Serializable]
 public class InterludeTextSettings
@@ -19,6 +19,12 @@ public class InterludeTextSettings
     public TextControl textControl;
     [Tooltip("指定文字的字型，若不指定則使用預設字型")]
     public TMP_FontAsset font;
+
+    [Header("圖片設定 (選填)")]
+    [Tooltip("此張幻燈片要更換的圖片 Sprite (需搭配 GameFlowController 的 Slide Image Display)")]
+    public Sprite slideSprite;
+    [Tooltip("此張幻燈片專屬的圖片 GameObject (若使用此欄位，會在此張投影片播放時自動 Active)")]
+    public GameObject slideImageObject;
 }
 
 public class GameFlowController : MonoBehaviour
@@ -44,13 +50,19 @@ public class GameFlowController : MonoBehaviour
     [Tooltip("每張幻燈片的文字設定 (按順序播放)，在 Inspector 中設定每張幻燈片的文字內容和對應的 TextControl")]
     public InterludeTextSettings[] introSlides;
 
+    [Header("開場介紹圖片總顯示器 (Sprite 更換模式)")]
+    [Tooltip("用於在轉場時顯示幻燈片圖片的單一 Image 元件，會自動根據每張投影片的 slideSprite 更換圖片")]
+    public Image slideImageDisplay;
+
     [Tooltip("FadeOut Timeline 的 PlayableDirector (用於暫停/恢復播放)。若未指定，會自動從 TimelineManager 中尋找 'FadeOut'")]
     public PlayableDirector fadeOutDirector;
 
     // 幻燈片狀態追蹤
-    private int _currentSlideIndex = 0;           // 目前播到第幾張幻燈片
+    private int _currentTextIndex = 0;             // 目前文字播到第幾張
+    private int _currentImageIndex = 0;            // 目前圖片更換到第幾張
     private bool _isWaitingForInput = false;       // 是否正在等待玩家按鍵
-    private InterludeTextSettings _activeSlide;    // 目前正在顯示的幻燈片
+    private InterludeTextSettings _activeTextSlide;  // 目前正在顯示文字的投影片
+    private InterludeTextSettings _activeImageSlide; // 目前正在顯示圖片的投影片
 
     // 將 "START_GAME" 定義為常數，避免魔法字串
     private const string StartGameSignal = "START_GAME";
@@ -71,25 +83,86 @@ public class GameFlowController : MonoBehaviour
             return;
         }
 
-        if (_currentSlideIndex >= introSlides.Length)
+        if (_currentTextIndex >= introSlides.Length)
         {
-            Debug.LogWarning($"[GameFlowController] 幻燈片已全部播完 (共 {introSlides.Length} 張)，沒有更多文字了。");
+            Debug.LogWarning($"[GameFlowController] 幻燈片文字已全部播完 (共 {introSlides.Length} 張)，沒有更多文字了。");
             return;
         }
 
-        // 清除上一張幻燈片的文字 (如果有的話)
-        if (_activeSlide != null)
+        // 清除上一張投影片的文字 (如果有的話)
+        if (_activeTextSlide != null)
         {
-            HideInterludeText(_activeSlide);
+            HideSlideTextOnly(_activeTextSlide);
         }
 
-        // 顯示當前幻燈片文字 (打字機效果)
-        _activeSlide = introSlides[_currentSlideIndex];
-        ShowInterludeText(_activeSlide);
-        Debug.Log($"[GameFlowController] 顯示幻燈片 [{_currentSlideIndex + 1}/{introSlides.Length}]: {_activeSlide.text}");
+        // 顯示當前投影片文字 (打字機效果)
+        _activeTextSlide = introSlides[_currentTextIndex];
+        ShowSlideTextOnly(_activeTextSlide);
+        Debug.Log($"[GameFlowController] 顯示幻燈片文字 [{_currentTextIndex + 1}/{introSlides.Length}]: {_activeTextSlide.text}");
 
-        _currentSlideIndex++;
+        _currentTextIndex++;
     }
+
+    /// <summary>
+    /// [供 Timeline Signal 呼叫] 更換為下一張投影片的圖片。
+    /// 配合 Timeline 動畫時間拉動，達到精確換圖點的目的。
+    /// </summary>
+    public void TriggerNextSlideImage()
+    {
+        if (introSlides == null || introSlides.Length == 0)
+        {
+            Debug.LogWarning("[GameFlowController] 沒有設定任何幻燈片圖片！");
+            return;
+        }
+
+        if (_currentImageIndex >= introSlides.Length)
+        {
+            Debug.LogWarning($"[GameFlowController] 幻燈片圖片已全部播完 (共 {introSlides.Length} 張)，沒有更多圖片了。");
+            return;
+        }
+
+        // 隱藏上一張的圖片
+        if (_activeImageSlide != null)
+        {
+            HideSlideImageOnly(_activeImageSlide);
+        }
+
+        // 顯示當前投影片圖片
+        _activeImageSlide = introSlides[_currentImageIndex];
+        ShowSlideImageOnly(_activeImageSlide);
+        Debug.Log($"[GameFlowController] 更換幻燈片圖片 [{_currentImageIndex + 1}/{introSlides.Length}]");
+
+        _currentImageIndex++;
+    }
+
+    /// <summary>
+    /// [供 Timeline Signal 呼叫] 清除並隱藏當前投影片的文字。
+    /// 可以放在 Timeline 當畫面完全變黑或遮罩擋住時，精確清除文字。
+    /// </summary>
+    public void ClearActiveSlideText()
+    {
+        if (_activeTextSlide != null)
+        {
+            HideSlideTextOnly(_activeTextSlide);
+            _activeTextSlide = null;
+            Debug.Log("[GameFlowController] 已透過 Signal 清除當前幻燈片文字。");
+        }
+    }
+
+    /// <summary>
+    /// [供 Timeline Signal 呼叫] 清除並隱藏當前投影片的圖片。
+    /// 可以放在 Timeline 當畫面完全變黑或需要隱藏圖片時，精確清除圖片。
+    /// </summary>
+    public void ClearActiveSlideImage()
+    {
+        if (_activeImageSlide != null)
+        {
+            HideSlideImageOnly(_activeImageSlide);
+            _activeImageSlide = null;
+            Debug.Log("[GameFlowController] 已透過 Signal 清除當前幻燈片圖片。");
+        }
+    }
+
 
     /// <summary>
     /// [供 Timeline Signal 呼叫] 暫停 Timeline 並等待玩家按下任意鍵繼續。
@@ -115,7 +188,8 @@ public class GameFlowController : MonoBehaviour
     /// </summary>
     public void TriggerFadeOutText()
     {
-        ShowInterludeText(fadeOutTextSettings);
+        ShowSlideTextOnly(fadeOutTextSettings);
+        _activeTextSlide = fadeOutTextSettings;
     }
 
     /// <summary>
@@ -123,7 +197,8 @@ public class GameFlowController : MonoBehaviour
     /// </summary>
     public void ClearFadeOutText()
     {
-        HideInterludeText(fadeOutTextSettings);
+        HideSlideTextOnly(fadeOutTextSettings);
+        if (_activeTextSlide == fadeOutTextSettings) _activeTextSlide = null;
     }
 
     /// <summary>
@@ -214,19 +289,9 @@ public class GameFlowController : MonoBehaviour
     // 內部邏輯
     // ================================================================
 
-    /// <summary>
-    /// 玩家按鍵後，清除當前文字並恢復 Timeline 播放。
-    /// </summary>
     private void ResumeTimeline()
     {
         _isWaitingForInput = false;
-
-        // 清除當前幻燈片文字
-        if (_activeSlide != null)
-        {
-            HideInterludeText(_activeSlide);
-            _activeSlide = null;
-        }
 
         // 恢復 Timeline 播放
         PlayableDirector director = GetFadeOutDirector();
@@ -284,23 +349,30 @@ public class GameFlowController : MonoBehaviour
     {
         isTransitioning = true;
 
-        // 重置幻燈片索引，確保每次開始遊戲都從第一張幻燈片開始
-        _currentSlideIndex = 0;
-        _activeSlide = null;
+        // 重置所有幻燈片狀態，確保每次開始遊戲都從第一張幻燈片開始
+        _currentTextIndex = 0;
+        _currentImageIndex = 0;
+        _activeTextSlide = null;
+        _activeImageSlide = null;
         _isWaitingForInput = false;
 
         // 手動啟用轉場圖片，準備播放動畫
         if (fadeImageObject != null) fadeImageObject.SetActive(true);
 
         // ====== 1. 播放漸暗動畫 (包含幻燈片介紹) ======
-        // 文字的顯示、暫停、恢復，全部由 FadeOut Timeline 內部的 Signal 觸發
+        // 文字與圖片的顯示、暫停、恢復，全部由 FadeOut Timeline 內部的 Signal 觸發
         yield return StartCoroutine(TimelineManager.Instance.PlayAndWait("FadeOut"));
 
-        // ====== 2. 確保所有幻燈片文字已清除 ======
-        if (_activeSlide != null)
+        // ====== 2. 確保所有幻燈片文字與圖片已清除 ======
+        if (_activeTextSlide != null)
         {
-            HideInterludeText(_activeSlide);
-            _activeSlide = null;
+            HideSlideTextOnly(_activeTextSlide);
+            _activeTextSlide = null;
+        }
+        if (_activeImageSlide != null)
+        {
+            HideSlideImageOnly(_activeImageSlide);
+            _activeImageSlide = null;
         }
 
         // ====== 3. 在全黑的狀態下，切換背後的畫布 ======
@@ -329,32 +401,99 @@ public class GameFlowController : MonoBehaviour
     }
 
     /// <summary>
-    /// 根據提供的設定來顯示一段插曲文字。
+    /// 顯示投影片的打字機文字。
     /// </summary>
-    /// <param name="settings">包含文字內容、UI 元件和字型的設定。</param>
-    private void ShowInterludeText(InterludeTextSettings settings)
+    private void ShowSlideTextOnly(InterludeTextSettings settings)
     {
-        if (settings == null || settings.textControl == null || string.IsNullOrEmpty(settings.text)) return;
+        if (settings == null) return;
 
-        // 套用自訂字型 (如果有的話)
-        if (settings.font != null)
+        if (settings.textControl != null && !string.IsNullOrEmpty(settings.text))
         {
-            TMP_Text tmp = settings.textControl.GetComponent<TMP_Text>();
-            if (tmp != null) tmp.font = settings.font;
-        }
+            // 套用自訂字型 (如果有的話)
+            if (settings.font != null)
+            {
+                TMP_Text tmp = settings.textControl.GetComponent<TMP_Text>();
+                if (tmp != null) tmp.font = settings.font;
+            }
 
-        settings.textControl.gameObject.SetActive(true);
-        settings.textControl.SetText(settings.text);
+            settings.textControl.gameObject.SetActive(true);
+            settings.textControl.SetText(settings.text);
+        }
     }
 
     /// <summary>
-    /// 根據提供的設定來清除並隱藏一段插曲文字。
+    /// 清除並隱藏投影片的文字。
     /// </summary>
-    private void HideInterludeText(InterludeTextSettings settings)
+    private void HideSlideTextOnly(InterludeTextSettings settings)
     {
-        if (settings == null || settings.textControl == null) return;
+        if (settings == null) return;
 
-        settings.textControl.ClearText();
-        settings.textControl.gameObject.SetActive(false);
+        if (settings.textControl != null)
+        {
+            settings.textControl.ClearText();
+            settings.textControl.gameObject.SetActive(false);
+        }
+    }
+
+    /// <summary>
+    /// 顯示投影片對應的圖片。
+    /// </summary>
+    private void ShowSlideImageOnly(InterludeTextSettings settings)
+    {
+        if (settings == null) return;
+
+        // 更換圖片 (Sprite 更換模式 - 共用單一 UI Image 顯示器)
+        if (settings.slideSprite != null && slideImageDisplay != null)
+        {
+            slideImageDisplay.gameObject.SetActive(true);
+            slideImageDisplay.sprite = settings.slideSprite;
+        }
+
+        // 顯示專屬圖片物件 (獨立 GameObject 模式)
+        if (settings.slideImageObject != null)
+        {
+            settings.slideImageObject.SetActive(true);
+
+            // 如果同時有指定 slideSprite，且該專屬物件有 Image 元件，就自動更換其 Sprite
+            if (settings.slideSprite != null)
+            {
+                Image img = settings.slideImageObject.GetComponent<Image>();
+                if (img != null)
+                {
+                    img.sprite = settings.slideSprite;
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// 清除並隱藏投影片對應的圖片。
+    /// </summary>
+    private void HideSlideImageOnly(InterludeTextSettings settings)
+    {
+        if (settings == null) return;
+
+        // 隱藏共用圖片顯示器
+        if (slideImageDisplay != null)
+        {
+            slideImageDisplay.gameObject.SetActive(false);
+            slideImageDisplay.sprite = null;
+        }
+
+        // 隱藏專屬圖片物件
+        if (settings.slideImageObject != null)
+        {
+            settings.slideImageObject.SetActive(false);
+
+            // 清除 Sprite 避免殘留
+            if (settings.slideSprite != null)
+            {
+                Image img = settings.slideImageObject.GetComponent<Image>();
+                if (img != null)
+                {
+                    img.sprite = null;
+                }
+            }
+        }
     }
 }
