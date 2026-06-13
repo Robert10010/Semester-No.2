@@ -56,6 +56,7 @@ public class TimelineManager : MonoBehaviour
     /// <summary>
     /// 播放指定的 Timeline，並等待播放完畢才繼續（用在 Coroutine 中）
     /// 用法：yield return StartCoroutine(TimelineManager.Instance.PlayAndWait("fadeOut"));
+    /// 支援中途暫停 (Pause) 與恢復 (Resume)，暫停時不會誤判為播放結束。
     /// </summary>
     /// <param name="timelineName">子物件的名稱</param>
     public IEnumerator PlayAndWait(string timelineName)
@@ -67,9 +68,16 @@ public class TimelineManager : MonoBehaviour
             director.Play();
             Debug.Log($"[TimelineManager] 開始播放 (等待模式): {timelineName}");
 
-            // 每幀檢查，直到 Timeline 不再處於播放狀態
-            while (director.state == PlayState.Playing)
+            // 等待直到 Timeline 真正播放結束 (到達最後一幀)
+            // 暫停 (Paused) 狀態下不算播完，會持續等待
+            while (true)
             {
+                // 只有當 Timeline 的播放時間已到達或超過總時長，才算真正結束
+                bool isAtEnd = director.time >= director.duration - 0.05f;
+                bool isStopped = director.state != PlayState.Playing && director.state != PlayState.Paused;
+
+                if (isAtEnd || isStopped) break;
+
                 yield return null;
             }
 

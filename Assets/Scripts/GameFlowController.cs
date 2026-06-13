@@ -2,6 +2,7 @@ using System.Collections;
 using UnityEngine;
 using TMPro; // 引用 TextMeshPro
 using UnityEngine.Playables;
+using UnityEngine.InputSystem;
 using InteractiveNovelGames.Typography.TextControl;
 
 /// <summary>
@@ -36,14 +37,81 @@ public class GameFlowController : MonoBehaviour
     [Header("系統參考")]
     public DialogueManager dialogueManager;
 
-    [Header("淡出轉場文字")]
+    [Header("淡出轉場文字 (舊版單一文字，向下相容)")]
     public InterludeTextSettings fadeOutTextSettings;
+
+    [Header("開場介紹幻燈片設定")]
+    [Tooltip("每張幻燈片的文字設定 (按順序播放)，在 Inspector 中設定每張幻燈片的文字內容和對應的 TextControl")]
+    public InterludeTextSettings[] introSlides;
+
+    [Tooltip("FadeOut Timeline 的 PlayableDirector (用於暫停/恢復播放)。若未指定，會自動從 TimelineManager 中尋找 'FadeOut'")]
+    public PlayableDirector fadeOutDirector;
+
+    // 幻燈片狀態追蹤
+    private int _currentSlideIndex = 0;           // 目前播到第幾張幻燈片
+    private bool _isWaitingForInput = false;       // 是否正在等待玩家按鍵
+    private InterludeTextSettings _activeSlide;    // 目前正在顯示的幻燈片
 
     // 將 "START_GAME" 定義為常數，避免魔法字串
     private const string StartGameSignal = "START_GAME";
 
+    // ================================================================
+    // Timeline Signal 可呼叫的公開方法
+    // ================================================================
+
     /// <summary>
-    /// [供 Timeline Signal 呼叫] 觸發淡出轉場文字的打字機效果。
+    /// [供 Timeline Signal 呼叫] 顯示下一張幻燈片的打字機文字。
+    /// 每次被 Signal 呼叫時，自動推進到下一張。
+    /// </summary>
+    public void TriggerNextSlideText()
+    {
+        if (introSlides == null || introSlides.Length == 0)
+        {
+            Debug.LogWarning("[GameFlowController] 沒有設定任何幻燈片文字！");
+            return;
+        }
+
+        if (_currentSlideIndex >= introSlides.Length)
+        {
+            Debug.LogWarning($"[GameFlowController] 幻燈片已全部播完 (共 {introSlides.Length} 張)，沒有更多文字了。");
+            return;
+        }
+
+        // 清除上一張幻燈片的文字 (如果有的話)
+        if (_activeSlide != null)
+        {
+            HideInterludeText(_activeSlide);
+        }
+
+        // 顯示當前幻燈片文字 (打字機效果)
+        _activeSlide = introSlides[_currentSlideIndex];
+        ShowInterludeText(_activeSlide);
+        Debug.Log($"[GameFlowController] 顯示幻燈片 [{_currentSlideIndex + 1}/{introSlides.Length}]: {_activeSlide.text}");
+
+        _currentSlideIndex++;
+    }
+
+    /// <summary>
+    /// [供 Timeline Signal 呼叫] 暫停 Timeline 並等待玩家按下任意鍵繼續。
+    /// </summary>
+    public void PauseForPlayerInput()
+    {
+        // 取得當前正在播放的 FadeOut Director
+        PlayableDirector director = GetFadeOutDirector();
+        if (director != null)
+        {
+            director.Pause();
+            _isWaitingForInput = true;
+            Debug.Log("[GameFlowController] Timeline 已暫停，等待玩家按鍵繼續...");
+        }
+        else
+        {
+            Debug.LogWarning("[GameFlowController] 找不到 FadeOut Director，無法暫停！");
+        }
+    }
+
+    /// <summary>
+    /// [供 Timeline Signal 呼叫] 觸發淡出轉場文字的打字機效果 (舊版，向下相容)。
     /// </summary>
     public void TriggerFadeOutText()
     {
@@ -51,7 +119,7 @@ public class GameFlowController : MonoBehaviour
     }
 
     /// <summary>
-    /// [供 Timeline Signal 呼叫] 清除並隱藏淡出轉場文字。
+    /// [供 Timeline Signal 呼叫] 清除並隱藏淡出轉場文字 (舊版，向下相容)。
     /// </summary>
     public void ClearFadeOutText()
     {
@@ -87,6 +155,10 @@ public class GameFlowController : MonoBehaviour
         }
     }
 
+    // ================================================================
+    // Unity 生命週期
+    // ================================================================
+
     private bool isTransitioning = false;
 
     void OnEnable()
@@ -107,6 +179,85 @@ public class GameFlowController : MonoBehaviour
         if (startCanvas != null) startCanvas.SetActive(true);
         if (playCanvas != null) playCanvas.SetActive(false);
         if (fadeImageObject != null) fadeImageObject.SetActive(false); // 確保轉場圖片預設是關閉的
+    }
+
+    void Update()
+    {
+        // 只有在等待玩家輸入時才處理按鍵
+        if (!_isWaitingForInput) return;
+
+        bool inputDetected = false;
+
+        // 滑鼠左鍵
+        if (Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame)
+            inputDetected = true;
+
+        // 鍵盤：空白鍵、Enter、Backspace
+        if (Keyboard.current != null)
+        {
+            if (Keyboard.current.spaceKey.wasPressedThisFrame ||
+                Keyboard.current.enterKey.wasPressedThisFrame ||
+                Keyboard.current.numpadEnterKey.wasPressedThisFrame ||
+                Keyboard.current.backspaceKey.wasPressedThisFrame)
+            {
+                inputDetected = true;
+            }
+        }
+
+        if (inputDetected)
+        {
+            ResumeTimeline();
+        }
+    }
+
+    // ================================================================
+    // 內部邏輯
+    // ================================================================
+
+    /// <summary>
+    /// 玩家按鍵後，清除當前文字並恢復 Timeline 播放。
+    /// </summary>
+    private void ResumeTimeline()
+    {
+        _isWaitingForInput = false;
+
+        // 清除當前幻燈片文字
+        if (_activeSlide != null)
+        {
+            HideInterludeText(_activeSlide);
+            _activeSlide = null;
+        }
+
+        // 恢復 Timeline 播放
+        PlayableDirector director = GetFadeOutDirector();
+        if (director != null)
+        {
+            director.Resume();
+            Debug.Log("[GameFlowController] 玩家按鍵，Timeline 繼續播放。");
+        }
+    }
+
+    /// <summary>
+    /// 取得 FadeOut Timeline 的 PlayableDirector。
+    /// 優先使用 Inspector 手動指定的，其次從 TimelineManager 自動搜尋。
+    /// </summary>
+    private PlayableDirector GetFadeOutDirector()
+    {
+        if (fadeOutDirector != null) return fadeOutDirector;
+
+        // 嘗試從 TimelineManager 自動取得
+        if (TimelineManager.Instance != null)
+        {
+            Transform tmTransform = TimelineManager.Instance.transform;
+            Transform fadeOutChild = tmTransform.Find("FadeOut");
+            if (fadeOutChild != null)
+            {
+                fadeOutDirector = fadeOutChild.GetComponent<PlayableDirector>();
+                return fadeOutDirector;
+            }
+        }
+
+        return null;
     }
 
     private void OnPhoneInput(string receivedNumber)
@@ -133,14 +284,26 @@ public class GameFlowController : MonoBehaviour
     {
         isTransitioning = true;
 
+        // 重置幻燈片索引，確保每次開始遊戲都從第一張幻燈片開始
+        _currentSlideIndex = 0;
+        _activeSlide = null;
+        _isWaitingForInput = false;
+
         // 手動啟用轉場圖片，準備播放動畫
         if (fadeImageObject != null) fadeImageObject.SetActive(true);
 
-        // ====== 1. 播放漸暗動畫 ======
-        // 文字的顯示與清除，現在已交由 FadeOut Timeline 內部的 Signal 觸發
+        // ====== 1. 播放漸暗動畫 (包含幻燈片介紹) ======
+        // 文字的顯示、暫停、恢復，全部由 FadeOut Timeline 內部的 Signal 觸發
         yield return StartCoroutine(TimelineManager.Instance.PlayAndWait("FadeOut"));
 
-        // ====== 2. 在全黑的狀態下，切換背後的畫布 ======
+        // ====== 2. 確保所有幻燈片文字已清除 ======
+        if (_activeSlide != null)
+        {
+            HideInterludeText(_activeSlide);
+            _activeSlide = null;
+        }
+
+        // ====== 3. 在全黑的狀態下，切換背後的畫布 ======
         if (startCanvas != null) startCanvas.SetActive(false);
         if (playCanvas != null)
         {
