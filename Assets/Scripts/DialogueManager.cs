@@ -85,6 +85,8 @@ public class DialogueManager : MonoBehaviour
     private bool isHangingUp = false;           // 標記目前是否正處於掛斷對話播放流程中，用以禁止顯示 NPC 2D 角色
 
     [Header("遊戲時間限制設定")]
+    [Tooltip("是否啟用遊戲時間限制 (預設為 false 關閉 3 分鐘限制)")]
+    public bool enableTimeLimit = false;
     [Tooltip("遊戲限時時間 (秒)，預設 180 秒 (3 分鐘)")]
     public float maxGameDuration = 180f;
     private float gameTimer = 0f;
@@ -126,6 +128,49 @@ public class DialogueManager : MonoBehaviour
     [Tooltip("結局演出的 PlayableDirector (EndingTimeline)，可在 Inspector 拖入")]
     public PlayableDirector endingDirector;
     private bool isEndingTriggered = false; // 標記是否已觸發結局流程
+
+    public enum EndingTestType { None, Success, Failure, Interesting, Escape }
+
+    [Header("結局測試工具")]
+    [Tooltip("選擇要在 Play 模式下測試的結局類型")]
+    public EndingTestType debugTestEnding = EndingTestType.None;
+
+    [System.Serializable]
+    public struct EndingConfig
+    {
+        [TextArea(1, 3)] public string line1;
+        [TextArea(1, 3)] public string line2;
+        [TextArea(1, 3)] public string line3;
+    }
+
+    [Header("結局文本設定")]
+    public EndingConfig successEnding = new EndingConfig 
+    { 
+        line1 = "你今天的表現很棒", 
+        line2 = "世界因為有你在而變得更加美好了", 
+        line3 = "明天請繼續加油" 
+    };
+
+    public EndingConfig failureEnding = new EndingConfig 
+    { 
+        line1 = "你因為表現不佳或多次違規，被公司辭退", 
+        line2 = "失去了工作該怎麼過日子呢", 
+        line3 = "" 
+    };
+
+    public EndingConfig interestingEnding = new EndingConfig 
+    { 
+        line1 = "你今天的效率有點低，被上司罵了一頓", 
+        line2 = "明天要記得好好加油", 
+        line3 = "" 
+    };
+
+    public EndingConfig escapeEnding = new EndingConfig 
+    { 
+        line1 = "你感到事情有些不對勁，決定開溜...", 
+        line2 = "這地方不能久留", 
+        line3 = "" 
+    };
 
     [Header("特殊新聞事件設定")]
     [Tooltip("新聞播報畫面物件 (例如 TV_news)")]
@@ -265,7 +310,8 @@ public class DialogueManager : MonoBehaviour
         if (dialogueTextControl != null) dialogueTextControl.gameObject.SetActive(false);
         if (dialogueTextControlUser != null) dialogueTextControlUser.gameObject.SetActive(false);
         
-        // 【開場手冊優化】移除原先直接的 TriggerNextCall()，改由開場手冊關閉後觸發！
+        // 轉場與開場 book_first Timeline 均已播放完畢，直接開始遊戲！
+        StartGameOfficially();
     }
 
     private void StartGameOfficially()
@@ -459,7 +505,7 @@ public class DialogueManager : MonoBehaviour
         }
 
         // 累加遊戲計時
-        if (isTimerRunning && !isTimeUp)
+        if (enableTimeLimit && isTimerRunning && !isTimeUp)
         {
             gameTimer += Time.deltaTime;
             if (gameTimer >= maxGameDuration)
@@ -471,7 +517,7 @@ public class DialogueManager : MonoBehaviour
         }
 
         // 當計時結束，且當前不在通話中（沒有在 Talking），立刻觸發結局
-        if (isTimeUp && currentPhoneState != PhoneState.Talking)
+        if (enableTimeLimit && isTimeUp && currentPhoneState != PhoneState.Talking)
         {
             TriggerEnding();
             return;
@@ -1040,23 +1086,6 @@ public class DialogueManager : MonoBehaviour
 
             child.gameObject.SetActive(false);
         }
-
-        // 如果是遊戲開始的第一次 Fadeout timeline 播放完畢，立即自動開啟開場教學手冊！
-        if (isFirstFadeOut)
-        {
-            isFirstFadeOut = false;
-            if (techBookDirector != null)
-            {
-                ToggleTechBook(true);
-                isInitialBookOpening = true;
-                Debug.Log("[DialogueManager] 開場 Fadeout 播放完畢，立即自動開啟教學手冊，播放前 150 幀。");
-            }
-            else
-            {
-                // 若無手冊，直接開始遊戲
-                StartGameOfficially();
-            }
-        }
     }
 
     private void ShowCharacterByTag(string tag, string characterName)
@@ -1202,8 +1231,8 @@ public class DialogueManager : MonoBehaviour
         // 電話掛斷，隱藏畫面上的角色
         HideAllCharacters();
         
-        // 檢查限時是否已到。若已到，立刻觸發結局，不再排程下一通電話！
-        if (isTimeUp)
+        // 檢查所有角色是否均已遊玩完畢，或者限時是否已到。若符合條件，立刻觸發結局，不再撥打下一通電話！
+        if (completedPeopleCount >= callerStartNodes.Count || (enableTimeLimit && isTimeUp))
         {
             TriggerEnding();
             return;
@@ -1262,13 +1291,28 @@ public class DialogueManager : MonoBehaviour
 
     void OnPhoneInput(string number)
     {
+        Debug.Log($"[DialogueManager] OnPhoneInput 收到訊號: {number}");
         if (string.IsNullOrEmpty(number)) return;
         string trimmedNumber = number.Trim();
 
-        // 處理帶有底線時間戳記的訊號 (例如 NEXT_1716543452 或 0_1716543452)
-        if (trimmedNumber.Contains("_"))
+        // 處理帶有底線時間戳記的訊號 (例如 NEXT_1716543452 或 0_1716543452)，僅在底線後方為純數字時間戳記時裁切
+        int lastUnderscore = trimmedNumber.LastIndexOf('_');
+        if (lastUnderscore >= 0 && lastUnderscore < trimmedNumber.Length - 1)
         {
-            trimmedNumber = trimmedNumber.Split('_')[0];
+            string potentialTimestamp = trimmedNumber.Substring(lastUnderscore + 1);
+            bool isNumeric = true;
+            foreach (char c in potentialTimestamp)
+            {
+                if (!char.IsDigit(c))
+                {
+                    isNumeric = false;
+                    break;
+                }
+            }
+            if (isNumeric && potentialTimestamp.Length >= 9)
+            {
+                trimmedNumber = trimmedNumber.Substring(0, lastUnderscore);
+            }
         }
 
         // === 處理特別指令：輸入 "0" 開啟教學手冊 (最優先，無論在任何遊戲階段或對話狀態) ===
@@ -1592,39 +1636,41 @@ public class DialogueManager : MonoBehaviour
     // --- 新增：結局判定核心邏輯 ---
     private void DetermineEnding()
     {
-        // 1. 優先判定 Fired 辭退結局 (完成 4 人以下 或 違反教學指南 4 次以上)
-        if (completedPeopleCount <= 4 || ruleViolationsCount >= 4)
+        // 1. 優先判定 Escape 烙跑結局 (完成 2 人以下，代表沒做幾通電話就跑了)
+        if (completedPeopleCount <= 2)
         {
-            PlayerPrefs.SetString("EndingType", "Fired");
-            if (completedPeopleCount <= 4)
-            {
-                PlayerPrefs.SetString("EndingLine1", "你因為效率過於低下，被公司辭退");
-            }
-            else
-            {
-                PlayerPrefs.SetString("EndingLine1", "你因為多次違反教學指南，被公司辭退");
-            }
-            PlayerPrefs.SetString("EndingLine2", "失去了工作該怎麼過日子呢");
-            PlayerPrefs.SetString("EndingLine3", "");
-            Debug.Log($"[DialogueManager] 結局判定：Fired 辭退結局 (完成人數: {completedPeopleCount}, 違反次數: {ruleViolationsCount})");
+            PlayerPrefs.SetString("EndingType", "Escape");
+            PlayerPrefs.SetString("EndingLine1", escapeEnding.line1);
+            PlayerPrefs.SetString("EndingLine2", escapeEnding.line2);
+            PlayerPrefs.SetString("EndingLine3", escapeEnding.line3);
+            Debug.Log($"[DialogueManager] 結局判定：Escape 烙跑結局 (完成人數: {completedPeopleCount}, 違反次數: {ruleViolationsCount})");
         }
-        // 2. 其次判定 AngryBoss 上司生氣結局 (完成 6 人以下 或 違反教學指南 2 次以上)
-        else if (completedPeopleCount <= 6 || ruleViolationsCount >= 2)
+        // 2. 其次判定 Failure 失敗結局 (完成 4 人以下 或 違反教學指南 4 次以上)
+        else if (completedPeopleCount <= 4 || ruleViolationsCount >= 4)
         {
-            PlayerPrefs.SetString("EndingType", "AngryBoss");
-            PlayerPrefs.SetString("EndingLine1", "你今天的效率有點低，被上司罵了一頓");
-            PlayerPrefs.SetString("EndingLine2", "明天要記得好好加油");
-            PlayerPrefs.SetString("EndingLine3", "");
-            Debug.Log($"[DialogueManager] 結局判定：AngryBoss 上司生氣結局 (完成人數: {completedPeopleCount}, 違反次數: {ruleViolationsCount})");
+            PlayerPrefs.SetString("EndingType", "Failure");
+            PlayerPrefs.SetString("EndingLine1", failureEnding.line1);
+            PlayerPrefs.SetString("EndingLine2", failureEnding.line2);
+            PlayerPrefs.SetString("EndingLine3", failureEnding.line3);
+            Debug.Log($"[DialogueManager] 結局判定：Failure 失敗結局 (完成人數: {completedPeopleCount}, 違反次數: {ruleViolationsCount})");
         }
-        // 3. 最後判定 Increase 優秀結局 (完成 6 人以上 並且 違反教學指南 2 次以下)
+        // 3. 再者判定 Interesting 有趣結局 (完成人數小於總人數，或 違反教學指南 2 次以上)
+        else if (completedPeopleCount < callerStartNodes.Count || ruleViolationsCount >= 2)
+        {
+            PlayerPrefs.SetString("EndingType", "Interesting");
+            PlayerPrefs.SetString("EndingLine1", interestingEnding.line1);
+            PlayerPrefs.SetString("EndingLine2", interestingEnding.line2);
+            PlayerPrefs.SetString("EndingLine3", interestingEnding.line3);
+            Debug.Log($"[DialogueManager] 結局判定：Interesting 有趣結局 (完成人數: {completedPeopleCount}, 違反次數: {ruleViolationsCount})");
+        }
+        // 4. 最後判定 Success 成功結局 (完成所有角色 並且 違反教學指南 2 次以下)
         else
         {
-            PlayerPrefs.SetString("EndingType", "Increase");
-            PlayerPrefs.SetString("EndingLine1", "你今天的表現很棒");
-            PlayerPrefs.SetString("EndingLine2", "世界因為有你在而變得更加美好了");
-            PlayerPrefs.SetString("EndingLine3", "明天請繼續加油");
-            Debug.Log($"[DialogueManager] 結局判定：Increase 優秀結局 (完成人數: {completedPeopleCount}, 違反次數: {ruleViolationsCount})");
+            PlayerPrefs.SetString("EndingType", "Success");
+            PlayerPrefs.SetString("EndingLine1", successEnding.line1);
+            PlayerPrefs.SetString("EndingLine2", successEnding.line2);
+            PlayerPrefs.SetString("EndingLine3", successEnding.line3);
+            Debug.Log($"[DialogueManager] 結局判定：Success 成功結局 (完成人數: {completedPeopleCount}, 違反次數: {ruleViolationsCount})");
         }
 
         // 同步儲存統計數據，方便結局場景展示詳細數據
@@ -1808,4 +1854,66 @@ public class DialogueManager : MonoBehaviour
         // 播完後立刻開始下一通電話 (也就是第三通電話)
         TriggerNextCall();
     }
+
+    [ContextMenu("Trigger Test Ending")]
+    public void TriggerTestEnding()
+    {
+        if (debugTestEnding == EndingTestType.None)
+        {
+            Debug.LogWarning("[DialogueManager] 請先在 debugTestEnding 選擇一個結局類型！");
+            return;
+        }
+
+        // 模擬對應結局的數據
+        switch (debugTestEnding)
+        {
+            case EndingTestType.Success:
+                completedPeopleCount = 6;
+                ruleViolationsCount = 0;
+                break;
+            case EndingTestType.Failure:
+                completedPeopleCount = 4;
+                ruleViolationsCount = 4;
+                break;
+            case EndingTestType.Interesting:
+                completedPeopleCount = 5;
+                ruleViolationsCount = 0;
+                break;
+            case EndingTestType.Escape:
+                completedPeopleCount = 2;
+                ruleViolationsCount = 0;
+                break;
+        }
+
+        // 直接調用結局觸發
+        TriggerEnding();
+    }
 }
+
+#if UNITY_EDITOR
+[UnityEditor.CustomEditor(typeof(DialogueManager))]
+public class DialogueManagerEditor : UnityEditor.Editor
+{
+    public override void OnInspectorGUI()
+    {
+        DrawDefaultInspector();
+
+        DialogueManager manager = (DialogueManager)target;
+
+        UnityEditor.EditorGUILayout.Space(15);
+        UnityEditor.EditorGUILayout.LabelField("【結局調試工具】", UnityEditor.EditorStyles.boldLabel);
+
+        if (UnityEngine.Application.isPlaying)
+        {
+            if (UnityEngine.GUILayout.Button("直接觸發測試結局 (需在 Play 模式下)"))
+            {
+                manager.TriggerTestEnding();
+            }
+        }
+        else
+        {
+            UnityEditor.EditorGUILayout.HelpBox("提示：進入 Play 模式即可點擊按鈕一鍵測試結局演出！", UnityEditor.MessageType.Info);
+        }
+    }
+}
+#endif

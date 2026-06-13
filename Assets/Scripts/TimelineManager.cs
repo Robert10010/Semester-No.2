@@ -8,6 +8,9 @@ public class TimelineManager : MonoBehaviour
     // 單例模式 (Singleton)，方便其他腳本直接呼叫
     public static TimelineManager Instance { get; private set; }
 
+    // 當前正在播放的 PlayableDirector
+    public PlayableDirector ActiveDirector { get; private set; }
+
     // 儲存所有子物件的 PlayableDirector
     private Dictionary<string, PlayableDirector> _directorsDict = new Dictionary<string, PlayableDirector>();
 
@@ -39,6 +42,8 @@ public class TimelineManager : MonoBehaviour
     {
         if (_directorsDict.TryGetValue(timelineName, out PlayableDirector director))
         {
+            ActiveDirector = director;
+
             // 播放前先註冊「播放完畢」的事件
             director.stopped += OnTimelineStopped;
 
@@ -63,10 +68,15 @@ public class TimelineManager : MonoBehaviour
     {
         if (_directorsDict.TryGetValue(timelineName, out PlayableDirector director))
         {
+            ActiveDirector = director;
+
             // 開啟物件並播放
             director.gameObject.SetActive(true);
             director.Play();
             Debug.Log($"[TimelineManager] 開始播放 (等待模式): {timelineName}");
+
+            // 等待一幀，讓 PlayableDirector 有時間啟動並更新 state 到 Playing
+            yield return null;
 
             // 等待直到 Timeline 真正播放結束 (到達最後一幀)
             // 暫停 (Paused) 狀態下不算播完，會持續等待
@@ -76,13 +86,18 @@ public class TimelineManager : MonoBehaviour
                 bool isAtEnd = director.time >= director.duration - 0.05f;
                 bool isStopped = director.state != PlayState.Playing && director.state != PlayState.Paused;
 
-                if (isAtEnd || isStopped) break;
+                if (isAtEnd || isStopped)
+                {
+                    Debug.Log($"[TimelineManager] {timelineName} 結束等待條件觸發。isAtEnd: {isAtEnd} (time={director.time:F2}/{director.duration:F2}), isStopped: {isStopped} (state={director.state})");
+                    break;
+                }
 
                 yield return null;
             }
 
             // 播放結束，關閉物件
             director.gameObject.SetActive(false);
+            if (ActiveDirector == director) ActiveDirector = null;
             Debug.Log($"[TimelineManager] {timelineName} 播放結束。");
         }
         else
@@ -99,6 +114,7 @@ public class TimelineManager : MonoBehaviour
 
         // 把該子物件隱藏起來，省效能也避免畫面殘留問題
         director.gameObject.SetActive(false);
+        if (ActiveDirector == director) ActiveDirector = null;
         Debug.Log($"[TimelineManager] {director.gameObject.name} 播放結束，已自動關閉物件。");
     }
 }

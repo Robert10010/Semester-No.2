@@ -57,10 +57,15 @@ public class GameFlowController : MonoBehaviour
     [Tooltip("FadeOut Timeline 的 PlayableDirector (用於暫停/恢復播放)。若未指定，會自動從 TimelineManager 中尋找 'FadeOut'")]
     public PlayableDirector fadeOutDirector;
 
-    // 幻燈片狀態追蹤
+    [Header("教學手冊 (Tutorial UI)")]
+    [Tooltip("教學手冊的 GameObject (若在 Timeline 播放中啟用/關閉)")]
+    public GameObject tutorialUIObject;
+
+    // 幻燈片與教學狀態追蹤
     private int _currentTextIndex = 0;             // 目前文字播到第幾張
     private int _currentImageIndex = 0;            // 目前圖片更換到第幾張
     private bool _isWaitingForInput = false;       // 是否正在等待玩家按鍵
+    private bool _isWaitingForTutorialInput = false; // 是否正在等待教學手冊輸入
     private InterludeTextSettings _activeTextSlide;  // 目前正在顯示文字的投影片
     private InterludeTextSettings _activeImageSlide; // 目前正在顯示圖片的投影片
 
@@ -165,6 +170,102 @@ public class GameFlowController : MonoBehaviour
 
 
     /// <summary>
+    /// [供 Timeline Signal 呼叫] 暫停 Timeline 並開啟教學手冊 UI，等待玩家按下手機 CALL 鍵或電腦空白鍵繼續。
+    /// (UI 會自動開啟 [透過 ShowTutorialUI]，但翻書音效需在 Timeline 中由開發者放置 Signal 獨立觸發以精確對齊動畫)
+    /// </summary>
+    public void PauseForTutorial()
+    {
+        PlayableDirector director = GetFadeOutDirector();
+        if (director != null)
+        {
+            director.Pause();
+            _isWaitingForTutorialInput = true;
+
+            // 自動顯示教學手冊 UI
+            ShowTutorialUI();
+
+            Debug.Log("[GameFlowController] Timeline 已暫停，已自動顯示手冊 UI，等待玩家按下手機 CALL 或電腦空白鍵解鎖...");
+        }
+    }
+
+    /// <summary>
+    /// [供 Timeline Signal 呼叫 / 內部呼叫] 顯示教學手冊 UI。
+    /// 可在 Timeline 中書本剛開始升起或打開的影格上放置此訊號。
+    /// </summary>
+    public void ShowTutorialUI()
+    {
+        if (tutorialUIObject != null)
+        {
+            tutorialUIObject.SetActive(true);
+            Debug.Log("[GameFlowController] 顯示教學手冊 UI。");
+        }
+    }
+
+    /// <summary>
+    /// [供 Timeline Signal 呼叫 / 內部呼叫] 隱藏教學手冊 UI。
+    /// 可在 Timeline 中書本關閉完畢或完全收回的影格上放置此訊號。
+    /// </summary>
+    public void HideTutorialUI()
+    {
+        if (tutorialUIObject != null)
+        {
+            tutorialUIObject.SetActive(false);
+            Debug.Log("[GameFlowController] 隱藏教學手冊 UI。");
+        }
+    }
+
+    /// <summary>
+    /// [供 Timeline Signal 呼叫] 播放教學手冊打開/拿起音效。
+    /// 可在 Timeline 中書本剛開始升起或打開的影格上放置此訊號。
+    /// </summary>
+    public void PlayTutorialOpenSFX()
+    {
+        if (AudioManager.Instance != null && dialogueManager != null)
+        {
+            string sfxName = dialogueManager.techBookPickUpSFXName;
+            if (!string.IsNullOrEmpty(sfxName))
+            {
+                AudioManager.PlaySound(sfxName);
+                Debug.Log($"[GameFlowController] 播放開書音效: {sfxName}");
+            }
+        }
+    }
+
+    /// <summary>
+    /// [供 Timeline Signal 呼叫] 播放教學手冊關閉/放下音效。
+    /// 可在 Timeline 中書本剛開始收合或降下的影格上放置此訊號。
+    /// </summary>
+    public void PlayTutorialCloseSFX()
+    {
+        if (AudioManager.Instance != null && dialogueManager != null)
+        {
+            string sfxName = dialogueManager.techBookPutDownSFXName;
+            if (!string.IsNullOrEmpty(sfxName))
+            {
+                AudioManager.PlaySound(sfxName);
+                Debug.Log($"[GameFlowController] 播放關書音效: {sfxName}");
+            }
+        }
+    }
+
+    /// <summary>
+    /// [可供 Timeline Signal 呼叫 / 內部呼叫] 恢復 Timeline 播放以繼續教學手冊的後續動畫。
+    /// (此處不再自動隱藏 UI，開發者需在 Timeline 的關閉/退場動畫結束處手動放置 HideTutorialUI 的 Signal 訊號)
+    /// </summary>
+    public void ResumeFromTutorial()
+    {
+        _isWaitingForTutorialInput = false;
+
+        // 恢復 Timeline 播放
+        PlayableDirector director = GetFadeOutDirector();
+        if (director != null)
+        {
+            director.Resume();
+            Debug.Log("[GameFlowController] 玩家解鎖成功，Timeline 繼續播放後續動畫...");
+        }
+    }
+
+    /// <summary>
     /// [供 Timeline Signal 呼叫] 暫停 Timeline 並等待玩家按下任意鍵繼續。
     /// </summary>
     public void PauseForPlayerInput()
@@ -236,14 +337,21 @@ public class GameFlowController : MonoBehaviour
 
     private bool isTransitioning = false;
 
+    void Awake()
+    {
+        Debug.Log("[GameFlowController] Awake 執行成功！物件已載入。");
+    }
+
     void OnEnable()
     {
+        Debug.Log("[GameFlowController] OnEnable 執行成功，開始訂閱 OnPhoneNumberReceived 事件！");
         // 訂閱手機訊號
         PhoneConnectionManager.OnPhoneNumberReceived += OnPhoneInput;
     }
 
     void OnDisable()
     {
+        Debug.Log("[GameFlowController] OnDisable 執行，取消訂閱事件！");
         // 取消訂閱
         PhoneConnectionManager.OnPhoneNumberReceived -= OnPhoneInput;
     }
@@ -258,30 +366,52 @@ public class GameFlowController : MonoBehaviour
 
     void Update()
     {
-        // 只有在等待玩家輸入時才處理按鍵
-        if (!_isWaitingForInput) return;
-
-        bool inputDetected = false;
-
-        // 滑鼠左鍵
-        if (Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame)
-            inputDetected = true;
-
-        // 鍵盤：空白鍵、Enter、Backspace
-        if (Keyboard.current != null)
+        // 1. 處理教學手冊輸入
+        if (_isWaitingForTutorialInput)
         {
-            if (Keyboard.current.spaceKey.wasPressedThisFrame ||
-                Keyboard.current.enterKey.wasPressedThisFrame ||
-                Keyboard.current.numpadEnterKey.wasPressedThisFrame ||
-                Keyboard.current.backspaceKey.wasPressedThisFrame)
+            bool inputDetected = false;
+
+            if (Keyboard.current != null && Keyboard.current.spaceKey.wasPressedThisFrame)
             {
                 inputDetected = true;
             }
+            if (Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame)
+            {
+                inputDetected = true;
+            }
+
+            if (inputDetected)
+            {
+                ResumeFromTutorial();
+                return;
+            }
         }
 
-        if (inputDetected)
+        // 2. 處理一般幻燈片等待輸入
+        if (_isWaitingForInput)
         {
-            ResumeTimeline();
+            bool inputDetected = false;
+
+            // 滑鼠左鍵
+            if (Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame)
+                inputDetected = true;
+
+            // 鍵盤：空白鍵、Enter、Backspace
+            if (Keyboard.current != null)
+            {
+                if (Keyboard.current.spaceKey.wasPressedThisFrame ||
+                    Keyboard.current.enterKey.wasPressedThisFrame ||
+                    Keyboard.current.numpadEnterKey.wasPressedThisFrame ||
+                    Keyboard.current.backspaceKey.wasPressedThisFrame)
+                {
+                    inputDetected = true;
+                }
+            }
+
+            if (inputDetected)
+            {
+                ResumeTimeline();
+            }
         }
     }
 
@@ -308,6 +438,12 @@ public class GameFlowController : MonoBehaviour
     /// </summary>
     private PlayableDirector GetFadeOutDirector()
     {
+        // 優先使用 TimelineManager 當前正在播放的 active director
+        if (TimelineManager.Instance != null && TimelineManager.Instance.ActiveDirector != null)
+        {
+            return TimelineManager.Instance.ActiveDirector;
+        }
+
         if (fadeOutDirector != null) return fadeOutDirector;
 
         // 嘗試從 TimelineManager 自動取得
@@ -327,8 +463,35 @@ public class GameFlowController : MonoBehaviour
 
     private void OnPhoneInput(string receivedNumber)
     {
+        Debug.Log($"[GameFlowController] OnPhoneInput 收到訊號: '{receivedNumber}'");
+        if (string.IsNullOrEmpty(receivedNumber)) return;
+        string trimmedNumber = receivedNumber.Trim();
+
+        // 處理帶有時間戳記的信號 (如 NEXT_1716543452)，僅在底線後方為 Unix 時間戳記(純數字且長度>=9)時進行裁切
+        int lastUnderscore = trimmedNumber.LastIndexOf('_');
+        if (lastUnderscore >= 0 && lastUnderscore < trimmedNumber.Length - 1)
+        {
+            string potentialTimestamp = trimmedNumber.Substring(lastUnderscore + 1);
+            bool isNumeric = true;
+            foreach (char c in potentialTimestamp)
+            {
+                if (!char.IsDigit(c))
+                {
+                    isNumeric = false;
+                    break;
+                }
+            }
+            if (isNumeric && potentialTimestamp.Length >= 9)
+            {
+                trimmedNumber = trimmedNumber.Substring(0, lastUnderscore);
+            }
+        }
+
+        bool isMatch = string.Equals(trimmedNumber, StartGameSignal, System.StringComparison.OrdinalIgnoreCase);
+        Debug.Log($"[GameFlowController] 訊號比較: '{trimmedNumber}' (長度={trimmedNumber.Length}) 與 '{StartGameSignal}' (長度={StartGameSignal.Length}), 是否相同: {isMatch}, startCanvas為空: {startCanvas == null}, isTransitioning: {isTransitioning}");
+
         // 如果收到的是網頁載入時送出的 START_GAME 訊號
-        if (receivedNumber == StartGameSignal)
+        if (isMatch)
         {
             // 防呆機制：只有在 StartCanvas 開啟著的時候（代表還沒開始遊戲），且不是正在轉場中，才允許開始
             if (startCanvas != null && startCanvas.activeSelf && !isTransitioning)
@@ -340,7 +503,20 @@ public class GameFlowController : MonoBehaviour
             {
                 // 如果 startCanvas 已經關閉（代表遊戲正在進行中）
                 // 收到 START_GAME 就直接忽略，防止別人重新整理網頁干擾現有玩家
-                Debug.Log("[GameFlowController] 忽略 START_GAME 訊號，因為遊戲已經在進行或正在轉場中。");
+                Debug.Log($"[GameFlowController] 忽略 START_GAME 訊號，原因: startCanvas是否啟用={((startCanvas != null) ? startCanvas.activeSelf : false)}, isTransitioning={isTransitioning}");
+            }
+        }
+
+        // 處理手機 CALL 鍵 (NEXT) 訊號
+        if (trimmedNumber == "NEXT")
+        {
+            if (_isWaitingForTutorialInput)
+            {
+                ResumeFromTutorial();
+            }
+            else if (_isWaitingForInput)
+            {
+                ResumeTimeline();
             }
         }
     }
@@ -349,12 +525,13 @@ public class GameFlowController : MonoBehaviour
     {
         isTransitioning = true;
 
-        // 重置所有幻燈片狀態，確保每次開始遊戲都從第一張幻燈片開始
+        // 重置所有幻燈片與教學狀態，確保每次開始遊戲都從第一張幻燈片開始
         _currentTextIndex = 0;
         _currentImageIndex = 0;
         _activeTextSlide = null;
         _activeImageSlide = null;
         _isWaitingForInput = false;
+        _isWaitingForTutorialInput = false;
 
         // 手動啟用轉場圖片，準備播放動畫
         if (fadeImageObject != null) fadeImageObject.SetActive(true);
@@ -388,7 +565,10 @@ public class GameFlowController : MonoBehaviour
         // ====== 4. 播放漸亮動畫 ======
         yield return StartCoroutine(TimelineManager.Instance.PlayAndWait("FadeIn"));
 
-        // ====== 5. 轉場結束，正式開始遊戲對話 ======
+        // ====== 4.5 播放開場書本 Timeline ======
+        yield return StartCoroutine(TimelineManager.Instance.PlayAndWait("book_first"));
+
+        // ====== 5. 轉場與書本播放結束，正式開始遊戲對話 ======
         if (dialogueManager != null)
         {
             dialogueManager.StartGame();
