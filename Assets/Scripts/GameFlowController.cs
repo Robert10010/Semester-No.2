@@ -362,6 +362,12 @@ public class GameFlowController : MonoBehaviour
         if (startCanvas != null) startCanvas.SetActive(true);
         if (playCanvas != null) playCanvas.SetActive(false);
         if (fadeImageObject != null) fadeImageObject.SetActive(false); // 確保轉場圖片預設是關閉的
+
+        // 播放開場背景音樂 BG_1
+        if (AudioManager.Instance != null)
+        {
+            AudioManager.Instance.PlayBGM("BG_1");
+        }
     }
 
     void Update()
@@ -525,6 +531,12 @@ public class GameFlowController : MonoBehaviour
     {
         isTransitioning = true;
 
+        // 漸變切換為常駐背景音樂 BG_2 (淡出舊音樂淡入新音樂，歷時 2 秒)
+        if (AudioManager.Instance != null)
+        {
+            AudioManager.Instance.TransitionToBGM("BG_2", 2f);
+        }
+
         // 重置所有幻燈片與教學狀態，確保每次開始遊戲都從第一張幻燈片開始
         _currentTextIndex = 0;
         _currentImageIndex = 0;
@@ -539,6 +551,12 @@ public class GameFlowController : MonoBehaviour
         // ====== 1. 播放漸暗動畫 (包含幻燈片介紹) ======
         // 文字與圖片的顯示、暫停、恢復，全部由 FadeOut Timeline 內部的 Signal 觸發
         yield return StartCoroutine(TimelineManager.Instance.PlayAndWait("FadeOut"));
+
+        // FadeOut 播放完畢，將背景音樂 BG_2 的音量比例漸變至 0.3 (歷時 2 秒)
+        if (AudioManager.Instance != null)
+        {
+            AudioManager.Instance.FadeBGMTo(0.3f, 2f);
+        }
 
         // ====== 2. 確保所有幻燈片文字與圖片已清除 ======
         if (_activeTextSlide != null)

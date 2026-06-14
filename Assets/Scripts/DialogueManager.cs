@@ -135,42 +135,7 @@ public class DialogueManager : MonoBehaviour
     [Tooltip("選擇要在 Play 模式下測試的結局類型")]
     public EndingTestType debugTestEnding = EndingTestType.None;
 
-    [System.Serializable]
-    public struct EndingConfig
-    {
-        [TextArea(1, 3)] public string line1;
-        [TextArea(1, 3)] public string line2;
-        [TextArea(1, 3)] public string line3;
-    }
 
-    [Header("結局文本設定")]
-    public EndingConfig successEnding = new EndingConfig 
-    { 
-        line1 = "你今天的表現很棒", 
-        line2 = "世界因為有你在而變得更加美好了", 
-        line3 = "明天請繼續加油" 
-    };
-
-    public EndingConfig failureEnding = new EndingConfig 
-    { 
-        line1 = "你因為表現不佳或多次違規，被公司辭退", 
-        line2 = "失去了工作該怎麼過日子呢", 
-        line3 = "" 
-    };
-
-    public EndingConfig interestingEnding = new EndingConfig 
-    { 
-        line1 = "你今天的效率有點低，被上司罵了一頓", 
-        line2 = "明天要記得好好加油", 
-        line3 = "" 
-    };
-
-    public EndingConfig escapeEnding = new EndingConfig 
-    { 
-        line1 = "你感到事情有些不對勁，決定開溜...", 
-        line2 = "這地方不能久留", 
-        line3 = "" 
-    };
 
     [Header("特殊新聞事件設定")]
     [Tooltip("新聞播報畫面物件 (例如 TV_news)")]
@@ -179,6 +144,7 @@ public class DialogueManager : MonoBehaviour
     public float tvNewsDuration = 10f;
     private bool firstCallWasHungUp = false; // 記錄第一通電話是否被玩家掛斷
     private bool isPlayingNews = false;      // 是否正在播放新聞畫面
+    private bool _isProcessingHangUpSp = false; // 是否正在處理特殊的掛斷自言自語流程
 
     [Header("結局玩法統計數據 (核心邏輯)")]
     private int completedPeopleCount = 0;  // 已成功完成對話的角色數量
@@ -408,6 +374,9 @@ public class DialogueManager : MonoBehaviour
 
     void Update()
     {
+        // 同步電視與新聞影片的音量至 BGM 主音量
+        UpdateVideoPlayersVolume();
+
         // 如果正在播放新聞，阻擋任何 Update 中的推進操作
         if (isPlayingNews) return;
 
@@ -821,6 +790,16 @@ public class DialogueManager : MonoBehaviour
         // 每次播放新節點時，立即隱藏並停止決策提示文字
         HideDecisionPrompt();
 
+        // 特殊處理 C3_HangUp_sp 或任何包含 HangUp_sp 的自言自語掛斷節點
+        if (!string.IsNullOrEmpty(nodeId) && nodeId.Contains("HangUp_sp"))
+        {
+            if (!_isProcessingHangUpSp)
+            {
+                StartCoroutine(PlayHangUpSpRoutine(nodeId));
+                return;
+            }
+        }
+
         if (string.IsNullOrEmpty(nodeId) || nodeId.ToLower() == "end" || !dialogueDatabase.ContainsKey(nodeId))
         {
             // 當正常對話路徑結束時，檢查是否要自動導向選擇節點 (_Continue)
@@ -852,6 +831,26 @@ public class DialogueManager : MonoBehaviour
         }
 
         currentNode = dialogueDatabase[nodeId];
+
+        // 偵測是否為掛斷節點 (NodeID 或文字內容包含 "HangUp")
+        bool isHangUpNode = !string.IsNullOrEmpty(nodeId) && 
+                            (nodeId.IndexOf("HangUp", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                             (currentNode != null && currentNode.TextContent != null && currentNode.TextContent.IndexOf("HangUp", StringComparison.OrdinalIgnoreCase) >= 0));
+
+        if (isHangUpNode)
+        {
+            UpdatePhoneVisuals(false); // 確保電話視覺狀態為放下
+            
+            // 只有在還沒有播放過掛斷音效時才播放 (例如不是經由 HANGUP 鍵觸發的，而是 NPC 主動掛斷)
+            if (!isHangingUp)
+            {
+                isHangingUp = true; // 標記處於掛斷流程中
+                if (AudioManager.Instance != null && !string.IsNullOrEmpty(phonePutDownSFXName))
+                {
+                    AudioManager.PlaySound(phonePutDownSFXName);
+                }
+            }
+        }
 
         // 只要這句對話中出現了標籤，就將其累加記錄到這通電話中
         if (currentNode != null)
@@ -1199,16 +1198,17 @@ public class DialogueManager : MonoBehaviour
         Debug.Log($"[DialogueManager] 成功完成與一個角色的對話。當前累計完成人數: {completedPeopleCount}");
 
         currentPhoneState = PhoneState.Idle;
-        isHangingUp = false; // 重置掛斷狀態
         
         // 確保掛斷時狀態為放下
         UpdatePhoneVisuals(false);
 
-        // 播放電話放下音效
-        if (AudioManager.Instance != null && !string.IsNullOrEmpty(phonePutDownSFXName))
+        // 播放電話放下音效 (若先前在 HANGUP 鍵或掛斷節點中尚未播放過)
+        if (!isHangingUp && AudioManager.Instance != null && !string.IsNullOrEmpty(phonePutDownSFXName))
         {
             AudioManager.PlaySound(phonePutDownSFXName);
         }
+
+        isHangingUp = false; // 重置掛斷狀態
 
         // 通知手機端停止播放並掛斷
         if (PhoneConnectionManager.Instance != null)
@@ -1244,6 +1244,12 @@ public class DialogueManager : MonoBehaviour
         if (firstCallWasHungUp && currentCallerIndex == 1 && tvNewsObject != null)
         {
             currentCallerIndex++; // 照常增加索引
+            StartCoroutine(PlayTVNewsRoutine());
+        }
+        // 新增：如果是第五通電話結束（即將撥打第六通，第六通索引為 5）
+        else if (currentCallerIndex == 4 && tvNewsObject != null)
+        {
+            currentCallerIndex++; // 增加索引至 5
             StartCoroutine(PlayTVNewsRoutine());
         }
         else
@@ -1374,6 +1380,12 @@ public class DialogueManager : MonoBehaviour
             {
                 firstCallWasHungUp = true;
                 Debug.Log("[DialogueManager] 特殊事件記錄：第一通電話已被掛斷。");
+            }
+
+            // 立即播放電話放下音效
+            if (AudioManager.Instance != null && !string.IsNullOrEmpty(phonePutDownSFXName))
+            {
+                AudioManager.PlaySound(phonePutDownSFXName);
             }
 
             // 掛斷時：關閉 PickUp，開啟 down
@@ -1640,36 +1652,24 @@ public class DialogueManager : MonoBehaviour
         if (completedPeopleCount <= 2)
         {
             PlayerPrefs.SetString("EndingType", "Escape");
-            PlayerPrefs.SetString("EndingLine1", escapeEnding.line1);
-            PlayerPrefs.SetString("EndingLine2", escapeEnding.line2);
-            PlayerPrefs.SetString("EndingLine3", escapeEnding.line3);
             Debug.Log($"[DialogueManager] 結局判定：Escape 烙跑結局 (完成人數: {completedPeopleCount}, 違反次數: {ruleViolationsCount})");
         }
         // 2. 其次判定 Failure 失敗結局 (完成 4 人以下 或 違反教學指南 4 次以上)
         else if (completedPeopleCount <= 4 || ruleViolationsCount >= 4)
         {
             PlayerPrefs.SetString("EndingType", "Failure");
-            PlayerPrefs.SetString("EndingLine1", failureEnding.line1);
-            PlayerPrefs.SetString("EndingLine2", failureEnding.line2);
-            PlayerPrefs.SetString("EndingLine3", failureEnding.line3);
             Debug.Log($"[DialogueManager] 結局判定：Failure 失敗結局 (完成人數: {completedPeopleCount}, 違反次數: {ruleViolationsCount})");
         }
         // 3. 再者判定 Interesting 有趣結局 (完成人數小於總人數，或 違反教學指南 2 次以上)
         else if (completedPeopleCount < callerStartNodes.Count || ruleViolationsCount >= 2)
         {
             PlayerPrefs.SetString("EndingType", "Interesting");
-            PlayerPrefs.SetString("EndingLine1", interestingEnding.line1);
-            PlayerPrefs.SetString("EndingLine2", interestingEnding.line2);
-            PlayerPrefs.SetString("EndingLine3", interestingEnding.line3);
             Debug.Log($"[DialogueManager] 結局判定：Interesting 有趣結局 (完成人數: {completedPeopleCount}, 違反次數: {ruleViolationsCount})");
         }
         // 4. 最後判定 Success 成功結局 (完成所有角色 並且 違反教學指南 2 次以下)
         else
         {
             PlayerPrefs.SetString("EndingType", "Success");
-            PlayerPrefs.SetString("EndingLine1", successEnding.line1);
-            PlayerPrefs.SetString("EndingLine2", successEnding.line2);
-            PlayerPrefs.SetString("EndingLine3", successEnding.line3);
             Debug.Log($"[DialogueManager] 結局判定：Success 成功結局 (完成人數: {completedPeopleCount}, 違反次數: {ruleViolationsCount})");
         }
 
@@ -1778,6 +1778,9 @@ public class DialogueManager : MonoBehaviour
     {
         isPlayingNews = true;
         currentPhoneState = PhoneState.Idle; // 確保電話狀態是閒置的，避免在新聞期間意外響鈴
+
+        // 先等待 3 秒鐘，給玩家喘息時間後再正式開始播放新聞
+        yield return new WaitForSeconds(3.0f);
         
         Debug.Log("[DialogueManager] 開始播放新聞播報畫面 (TV_news)...");
         
@@ -1853,6 +1856,98 @@ public class DialogueManager : MonoBehaviour
 
         // 播完後立刻開始下一通電話 (也就是第三通電話)
         TriggerNextCall();
+    }
+
+    /// <summary>
+    /// 特殊掛斷自言自語處理協程：先掛斷電話、等掛斷音效播放完畢，再展開自言自語對話
+    /// </summary>
+    private IEnumerator PlayHangUpSpRoutine(string nodeId)
+    {
+        _isProcessingHangUpSp = true;
+
+        // 1. 先掛斷電話
+        UpdatePhoneVisuals(false); // 確保電話視覺狀態為放下 (down)
+        isHangingUp = true;        // 標記處於掛斷流程中，防止顯示 NPC 角色與重複播放音效
+
+        // 隱藏所有角色 (觸發 Timeline 漸隱)
+        HideAllCharacters();
+
+        // 播放掛斷放下話筒音效
+        if (AudioManager.Instance != null && !string.IsNullOrEmpty(phonePutDownSFXName))
+        {
+            AudioManager.PlaySound(phonePutDownSFXName);
+        }
+
+        // 通知實體電話/手機端掛斷
+        if (PhoneConnectionManager.Instance != null)
+        {
+            PhoneConnectionManager.Instance.SendSignalToPhone("HANGUP");
+        }
+
+        // 2. 等待掛斷音效播放完畢 (掛斷音大約為 1.0 秒)
+        yield return new WaitForSeconds(1.0f);
+
+        // 3. 展開對話 (再次調用 PlayNode，此時 _isProcessingHangUpSp 為 true，會正常解析節點內容)
+        PlayNode(nodeId);
+
+        _isProcessingHangUpSp = false;
+    }
+
+    /// <summary>
+    /// 即時同步電視與新聞影片的音量至 BGM 主音量
+    /// </summary>
+    private void UpdateVideoPlayersVolume()
+    {
+        if (AudioManager.Instance == null) return;
+
+        // 我們將電視與新聞影片的音量與背景音樂 (BGM) 主音量進行綁定
+        float targetVolume = AudioManager.Instance.BGMVolume;
+
+        // 1. 同步電視噪聲影片音量
+        if (tvVideoPlayer != null && tvVideoPlayer.gameObject.activeInHierarchy && tvVideoPlayer.isPlaying)
+        {
+            SetVideoPlayerVolume(tvVideoPlayer, targetVolume);
+        }
+
+        // 2. 同步新聞影片音量
+        if (tvNewsObject != null && tvNewsObject.activeInHierarchy)
+        {
+            VideoPlayer newsVideo = tvNewsObject.GetComponent<VideoPlayer>();
+            if (newsVideo == null) newsVideo = tvNewsObject.GetComponentInChildren<VideoPlayer>();
+            if (newsVideo != null && newsVideo.isPlaying)
+            {
+                SetVideoPlayerVolume(newsVideo, targetVolume);
+            }
+        }
+    }
+
+    /// <summary>
+    /// 設置 VideoPlayer 的音量，相容 Direct 與 AudioSource 兩種音訊輸出模式
+    /// </summary>
+    private void SetVideoPlayerVolume(VideoPlayer vp, float targetVolume)
+    {
+        if (vp == null) return;
+
+        // 模式 A：如果是 AudioSource 輸出模式，調整對應 AudioSource 的音量
+        if (vp.audioOutputMode == VideoAudioOutputMode.AudioSource)
+        {
+            for (ushort i = 0; i < vp.audioTrackCount; i++)
+            {
+                AudioSource source = vp.GetTargetAudioSource(i);
+                if (source != null)
+                {
+                    source.volume = targetVolume;
+                }
+            }
+        }
+        // 模式 B：如果是 Direct 或其他模式，直接調用 VideoPlayer API 控制音量
+        else
+        {
+            for (ushort i = 0; i < vp.audioTrackCount; i++)
+            {
+                vp.SetDirectAudioVolume(i, targetVolume);
+            }
+        }
     }
 
     [ContextMenu("Trigger Test Ending")]

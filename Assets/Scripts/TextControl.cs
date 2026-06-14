@@ -6,7 +6,6 @@ using UnityEngine.InputSystem;
 
 namespace InteractiveNovelGames.Typography.TextControl
 {
-
     [RequireComponent(typeof(TMP_Text))]
     public class TextControl : MonoBehaviour
     {
@@ -16,7 +15,7 @@ namespace InteractiveNovelGames.Typography.TextControl
         
         private int _currentVisibleCharacterIndex;
         private Coroutine _typingCoroutine;  
-        
+
         private AudioSource _audioSource;
         private AudioClip _typingClip;
         private Coroutine _soundCoroutine;
@@ -55,6 +54,13 @@ namespace InteractiveNovelGames.Typography.TextControl
             _textBox = GetComponent<TMP_Text>();
             _simpleDeleay = new WaitForSeconds(1/charactersPerSecond);
             _interpunctuationDelay = new WaitForSeconds(interpunctuationDelay);
+            
+            // 安全保底：如果 Inspector 中沒有設定打字音效，自動保底設為 "Dialogue_sound_1"
+            if (string.IsNullOrEmpty(typingSoundName))
+            {
+                typingSoundName = "Dialogue_sound_1";
+            }
+            
             _isAwakeDone = true;
         }
 
@@ -116,7 +122,9 @@ namespace InteractiveNovelGames.Typography.TextControl
                 if (_audioSource == null) _audioSource = gameObject.AddComponent<AudioSource>();
                 _audioSource.playOnAwake = false;
             }
-            if (!string.IsNullOrEmpty(typingSoundName) && AudioManager.Instance != null)
+            if (!string.IsNullOrEmpty(typingSoundName) && 
+                !typingSoundName.Equals("none", StringComparison.OrdinalIgnoreCase) && 
+                AudioManager.Instance != null)
             {
                 _typingClip = AudioManager.Instance.GetSFXClip(typingSoundName);
                 if (_typingClip != null)
@@ -234,8 +242,21 @@ namespace InteractiveNovelGames.Typography.TextControl
             _audioSource.clip = _typingClip;
             _audioSource.loop = false; // 一個一個播放
 
+            // 獲取該音效在 AudioManager 中的自訂音量比例
+            float clipVolumeScale = 1f;
+            if (AudioManager.Instance != null && !string.IsNullOrEmpty(typingSoundName))
+            {
+                clipVolumeScale = AudioManager.Instance.GetSFXVolumeScale(typingSoundName);
+            }
+
             while (IsTyping)
             {
+                // 動態同步音效主音量 * 音效專屬音量比例
+                if (AudioManager.Instance != null)
+                {
+                    _audioSource.volume = AudioManager.Instance.SFXVolume * clipVolumeScale;
+                }
+
                 if (!_audioSource.isPlaying)
                 {
                     _audioSource.Play();

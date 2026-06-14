@@ -1,13 +1,32 @@
 using UnityEngine;
+using System;
 using System.Collections;
 using TMPro; // 支援 TextMeshPro
 using UnityEngine.SceneManagement; // 支援回到主場景
 using UnityEngine.InputSystem; // 支援新的 Input System
 using UnityEngine.Playables; // 支援 Timeline 控制
+using UnityEngine.UI; // 支援動態建立遮罩圖片
+
+/// <summary>
+/// 定義結局幻燈片單張投影片的文字與圖片內容
+/// </summary>
+[System.Serializable]
+public class EndingSlide
+{
+    [TextArea(3, 5)]
+    [Tooltip("該頁投影片的對話文字內容")]
+    public string text;
+
+    [Tooltip("該頁投影片更換的圖片 Sprite (需搭配 slideImageDisplay)")]
+    public Sprite slideSprite;
+
+    [Tooltip("該頁投影片專屬的圖片 GameObject (會在此頁播放時自動 Active，其餘自動隱藏)")]
+    public GameObject slideImageObject;
+}
 
 /// <summary>
 /// 控制結局場景 (EndingScenes) 的 UI 顯示。
-/// 自動讀取 PlayerPrefs 中的結局判定，動態啟用對應圖片，並提供文字與圖片本身漸亮 (Fade-In) 顯示、富文本打字機效果與自動重置返回主場景功能。
+/// 自動讀取 PlayerPrefs 中的結局判定，動態啟用對應圖片，並提供文字與圖片本身漸亮 (Fade-In) 顯示、富文本打字機效果。
 /// </summary>
 public class EndingSceneController : MonoBehaviour
 {
@@ -33,47 +52,45 @@ public class EndingSceneController : MonoBehaviour
     [Tooltip("打字機每個字浮現的間隔時間 (秒)")]
     public float typingSpeed = 0.05f;
 
-    [Header("自動重置/返回主場景設定")]
-    [Tooltip("結局文字完全顯示後，停留多少秒自動回到主場景 (秒)")]
-    public float autoReturnDelay = 10f;
-    
+    [Tooltip("打字時播放的音效名稱 (在 AudioManager 中設定的名稱)")]
+    public string typingSoundName = "Dialogue_sound_1";
+
+    [Header("場景設定")]
     [Tooltip("主線遊戲場景的名稱")]
     public string mainSceneName = "MainScene";
+
+    public enum EndingTestType { None, Success, Failure, Interesting, Escape }
+
+    [Header("結局測試工具 (直接在結局場景執行時使用)")]
+    [Tooltip("選擇要在結局場景直接測試播放的結局類型")]
+    public EndingTestType debugEndingType = EndingTestType.None;
 
     [Header("結局 Timeline 播放器 (可選)")]
     [Tooltip("用於控制結局畫面切換的 Timeline 播放器 (endingTimeline)，若放入則會切換為 Timeline 訊號控制模式")]
     public PlayableDirector endingTimeline;
 
-    [Header("結局圖片物件 (Ending_Image 中的子圖片物件)")]
-    [Tooltip("成功結局 - 圖片 1")]
-    public GameObject successImage1;
+    [Header("結局投影片設定 (像 Intro Slides 一樣)")]
+    [Tooltip("成功結局的投影片列表")]
+    public EndingSlide[] successSlides;
 
-    [Tooltip("成功結局 - 圖片 2")]
-    public GameObject successImage2;
+    [Tooltip("失敗結局的投影片列表")]
+    public EndingSlide[] failureSlides;
 
-    [Tooltip("失敗結局 - 圖片 1")]
-    public GameObject failureImage1;
+    [Tooltip("有趣結局的投影片列表")]
+    public EndingSlide[] interestingSlides;
 
-    [Tooltip("失敗結局 - 圖片 2")]
-    public GameObject failureImage2;
+    [Tooltip("烙跑結局的投影片列表")]
+    public EndingSlide[] escapeSlides;
 
-    [Tooltip("有趣結局 - 圖片")]
-    public GameObject interestingImage;
-
-    [Tooltip("烙跑結局 - 圖片")]
-    public GameObject escapeImage;
-
-    // 向下相容隱藏舊變數，確保已在舊 Inspector 綁定的物件不會失效
-    [HideInInspector] public GameObject angryImageObject;
-    [HideInInspector] public GameObject firedImageObject;
-    [HideInInspector] public GameObject firedLowEfficiencyImageObject;
-    [HideInInspector] public GameObject firedViolationsImageObject;
-    [HideInInspector] public GameObject increacetImageObject;
+    [Tooltip("用於在結局更換圖片的單一 Image 元件 (Sprite 模式)")]
+    public UnityEngine.UI.Image slideImageDisplay;
 
     private Coroutine typingCoroutine;       // 打字機協程引用
     private bool isTypingFinished = false;    // 標記打字是否完成
     private int totalVisibleCharacters = 0;   // 結局文本的總字元數
-    private bool isReturnRoutineStarted = false; // 標記是否已啟動回到主場景的計時
+
+    private AudioSource _audioSource;
+    private Coroutine _soundCoroutine;
 
     private bool isWaitingForEndingInput = false; // 是否正在等待玩家點擊或空白鍵繼續 Timeline
     private int currentEndingTextIndex = 0;       // 當前播放的結局文字行索引
@@ -81,6 +98,18 @@ public class EndingSceneController : MonoBehaviour
 
     void Start()
     {
+        // 播放結局背景音樂 BG_3 (從遊玩音樂 BG_2 平滑切換過來，歷時 1.5 秒)
+        if (AudioManager.Instance != null)
+        {
+            AudioManager.Instance.TransitionToBGM("BG_3", 1.5f);
+        }
+
+        // 安全保底：如果 Inspector 中沒有設定結局打字音效，自動保底設為 "Dialogue_sound_1"
+        if (string.IsNullOrEmpty(typingSoundName))
+        {
+            typingSoundName = "Dialogue_sound_1";
+        }
+
         // 1. 自動保底搜尋結局圖文的 CanvasGroup 組件
         if (endingContentCanvasGroup == null)
         {
@@ -118,34 +147,26 @@ public class EndingSceneController : MonoBehaviour
         }
 
         // 4. 讀取先前 DialogueManager 存儲的結局對話與今日統計數據
-        string endingType = PlayerPrefs.GetString("EndingType", "AngryBoss"); // 預設為 AngryBoss
-        string line1 = PlayerPrefs.GetString("EndingLine1", "這是測試結局文字的第一行 (請從主場景執行以套用正式文本)");
-        string line2 = PlayerPrefs.GetString("EndingLine2", "這是測試結局文字的第二行");
-        string line3 = PlayerPrefs.GetString("EndingLine3", "這是測試結局文字的第三行");
-
+        string endingType = GetEndingType();
         int completedCount = PlayerPrefs.GetInt("CompletedPeopleCount", 0);
         int violationsCount = PlayerPrefs.GetInt("RuleViolationsCount", 0);
 
         Debug.Log($"[EndingSceneController] 結局場景載入！類型: {endingType}, 完成人數: {completedCount}, 違反指南: {violationsCount}");
 
-        // 保底相容舊的 Inspector 欄位 Drag-and-Drop
-        if (interestingImage == null) interestingImage = angryImageObject;
-        if (failureImage1 == null) failureImage1 = firedImageObject;
-        if (successImage1 == null) successImage1 = increacetImageObject;
+        currentEndingTextIndex = 0;
+        currentEndingImageIndex = 0;
 
         if (endingTimeline != null)
         {
             // Timeline 模式：重置所有文字與圖片，交由 Timeline 訊號控制
             if (endingTextUI != null) endingTextUI.text = "";
             if (statsTextUI != null) statsTextUI.gameObject.SetActive(false);
-            if (successImage1 != null) successImage1.SetActive(false);
-            if (successImage2 != null) successImage2.SetActive(false);
-            if (failureImage1 != null) failureImage1.SetActive(false);
-            if (failureImage2 != null) failureImage2.SetActive(false);
-            if (interestingImage != null) interestingImage.SetActive(false);
-            if (escapeImage != null) escapeImage.SetActive(false);
+            if (slideImageDisplay != null) slideImageDisplay.gameObject.SetActive(false);
+            
+            // 隱藏所有投影片的 GameObject
+            HideAllEndingSlideObjects();
 
-            endingTimeline.stopped += OnEndingTimelineStopped;
+            endingTimeline.played += OnEndingTimelinePlayed;
             endingTimeline.time = 0;
             endingTimeline.Evaluate();
             endingTimeline.Play();
@@ -155,9 +176,53 @@ public class EndingSceneController : MonoBehaviour
         {
             // 舊的自動播放邏輯 (向下相容)
             // 5. 準備結局文本內容與統計內容
-            string fullText = line1;
-            if (!string.IsNullOrEmpty(line2)) fullText += "\n" + line2;
-            if (!string.IsNullOrEmpty(line3)) fullText += "\n" + line3;
+            string fullText = "";
+            EndingSlide[] activeSlides = GetActiveSlides(endingType);
+            
+            if (activeSlides != null && activeSlides.Length > 0)
+            {
+                for (int i = 0; i < activeSlides.Length; i++)
+                {
+                    if (activeSlides[i] != null && !string.IsNullOrEmpty(activeSlides[i].text))
+                    {
+                        if (fullText != "") fullText += "\n";
+                        fullText += activeSlides[i].text;
+                    }
+                }
+                
+                // 顯示第一張投影片的圖片
+                if (activeSlides[0] != null)
+                {
+                    DisplaySlideImage(activeSlides[0], activeSlides);
+                }
+            }
+            else
+            {
+                // 保底相容舊格式 (從 PlayerPrefs 讀取)
+                int totalLines = PlayerPrefs.GetInt("EndingLineCount", 0);
+                if (totalLines > 0)
+                {
+                    for (int i = 0; i < totalLines; i++)
+                    {
+                        string line = PlayerPrefs.GetString($"EndingLine_{i}", "");
+                        if (!string.IsNullOrEmpty(line))
+                        {
+                            if (fullText != "") fullText += "\n";
+                            fullText += line;
+                        }
+                    }
+                }
+                else
+                {
+                    string legacyLine1 = PlayerPrefs.GetString("EndingLine1", "這是測試結局對話的段落 (請從主場景執行以套用正式文本)");
+                    string legacyLine2 = PlayerPrefs.GetString("EndingLine2", "");
+                    string legacyLine3 = PlayerPrefs.GetString("EndingLine3", "");
+                    
+                    fullText = legacyLine1;
+                    if (!string.IsNullOrEmpty(legacyLine2)) fullText += "\n" + legacyLine2;
+                    if (!string.IsNullOrEmpty(legacyLine3)) fullText += "\n" + legacyLine3;
+                }
+            }
 
             if (showStats)
             {
@@ -189,43 +254,11 @@ public class EndingSceneController : MonoBehaviour
             if (endingTextUI != null)
             {
                 isTypingFinished = false;
-                isReturnRoutineStarted = false;
                 typingCoroutine = StartCoroutine(TypeTextPlay(fullText));
             }
             else
             {
                 Debug.LogWarning("[EndingSceneController] 未綁定 endingTextUI (Ending_text)！");
-            }
-
-            // 7. 根據結局類型，動態啟用對應的結局圖片，並隱藏其餘的圖片
-            if (successImage1 != null) successImage1.SetActive(false);
-            if (successImage2 != null) successImage2.SetActive(false);
-            if (failureImage1 != null) failureImage1.SetActive(false);
-            if (failureImage2 != null) failureImage2.SetActive(false);
-            if (interestingImage != null) interestingImage.SetActive(false);
-            if (escapeImage != null) escapeImage.SetActive(false);
-
-            switch (endingType)
-            {
-                case "Success":
-                    if (successImage1 != null) successImage1.SetActive(true);
-                    break;
-                    
-                case "Failure":
-                    if (failureImage1 != null) failureImage1.SetActive(true);
-                    break;
-                    
-                case "Interesting":
-                    if (interestingImage != null) interestingImage.SetActive(true);
-                    break;
-
-                case "Escape":
-                    if (escapeImage != null) escapeImage.SetActive(true);
-                    break;
-
-                default:
-                    if (interestingImage != null) interestingImage.SetActive(true);
-                    break;
             }
         }
     }
@@ -244,13 +277,18 @@ public class EndingSceneController : MonoBehaviour
                 typingCoroutine = null;
                 if (endingTextUI != null) endingTextUI.maxVisibleCharacters = totalVisibleCharacters;
                 isTypingFinished = true;
-                Debug.Log("[EndingSceneController] 玩家跳過了打字機效果，瞬間顯示當前結局文字。");
-                
-                // 非 Timeline 模式下，瞬間顯示後立刻啟動返回主場景計時
-                if (endingTimeline == null)
+
+                if (_soundCoroutine != null)
                 {
-                    StartAutoReturnTimer();
+                    StopCoroutine(_soundCoroutine);
+                    _soundCoroutine = null;
                 }
+                if (_audioSource != null)
+                {
+                    _audioSource.Stop();
+                }
+
+                Debug.Log("[EndingSceneController] 玩家跳過了打字機效果，瞬間顯示當前結局文字。");
                 return; // 攔截本次點擊，避免重複推進
             }
         }
@@ -261,6 +299,14 @@ public class EndingSceneController : MonoBehaviour
             if (spacePressed || clicked)
             {
                 ResumeEndingTimeline();
+            }
+        }
+        // C. 非 Timeline 模式下，打字完成後，玩家點擊或按空白鍵直接回到主場景
+        else if (endingTimeline == null && isTypingFinished)
+        {
+            if (spacePressed || clicked)
+            {
+                ReturnToMainScene();
             }
         }
     }
@@ -297,6 +343,22 @@ public class EndingSceneController : MonoBehaviour
         endingTextUI.ForceMeshUpdate();
         totalVisibleCharacters = endingTextUI.textInfo.characterCount;
 
+        // 啟動音效播放協程
+        if (_audioSource == null)
+        {
+            _audioSource = GetComponent<AudioSource>();
+            if (_audioSource == null) _audioSource = gameObject.AddComponent<AudioSource>();
+            _audioSource.playOnAwake = false;
+        }
+
+        if (_soundCoroutine != null) StopCoroutine(_soundCoroutine);
+        if (!string.IsNullOrEmpty(typingSoundName) && 
+            !typingSoundName.Equals("none", StringComparison.OrdinalIgnoreCase) && 
+            AudioManager.Instance != null)
+        {
+            _soundCoroutine = StartCoroutine(PlayTypingSoundsRoutine());
+        }
+
         int counter = 0;
         while (counter <= totalVisibleCharacters)
         {
@@ -309,27 +371,15 @@ public class EndingSceneController : MonoBehaviour
         endingTextUI.maxVisibleCharacters = totalVisibleCharacters;
         isTypingFinished = true;
 
-        // 正常打完字後，啟動 10 秒返回主場景倒數計時
-        StartAutoReturnTimer();
-    }
-
-    /// <summary>
-    /// 啟動自動返回主場景倒數計時器
-    /// </summary>
-    private void StartAutoReturnTimer()
-    {
-        if (isReturnRoutineStarted) return;
-        isReturnRoutineStarted = true;
-        StartCoroutine(AutoReturnRoutine());
-    }
-
-    private IEnumerator AutoReturnRoutine()
-    {
-        Debug.Log($"[EndingSceneController] 結局已完全顯示，將在 {autoReturnDelay} 秒後自動返回主場景 {mainSceneName} 重新開始...");
-        yield return new WaitForSeconds(autoReturnDelay);
-        
-        Debug.Log($"[EndingSceneController] {autoReturnDelay} 秒時間已到！正在載入主場景 {mainSceneName} 重新開始遊戲...");
-        SceneManager.LoadScene(mainSceneName);
+        if (_soundCoroutine != null)
+        {
+            StopCoroutine(_soundCoroutine);
+            _soundCoroutine = null;
+        }
+        if (_audioSource != null)
+        {
+            _audioSource.Stop();
+        }
     }
 
     // ================================================================
@@ -338,25 +388,53 @@ public class EndingSceneController : MonoBehaviour
 
     /// <summary>
     /// [供 Timeline Signal 呼叫] 顯示下一句結局對話台詞。
-    /// 每次觸發時，依序顯示 Line1, Line2, Line3，並啟動打字機效果。
+    /// 每次觸發時，依序顯示對話框段落，並啟動打字機效果。
     /// </summary>
     public void TriggerNextEndingText()
     {
+        string endingType = GetEndingType();
+        EndingSlide[] activeSlides = GetActiveSlides(endingType);
+
         string nextLine = "";
-        if (currentEndingTextIndex == 0) nextLine = PlayerPrefs.GetString("EndingLine1", "");
-        else if (currentEndingTextIndex == 1) nextLine = PlayerPrefs.GetString("EndingLine2", "");
-        else if (currentEndingTextIndex == 2) nextLine = PlayerPrefs.GetString("EndingLine3", "");
+        int totalLines = activeSlides != null ? activeSlides.Length : 0;
+
+        if (totalLines > 0)
+        {
+            if (currentEndingTextIndex < totalLines)
+            {
+                nextLine = activeSlides[currentEndingTextIndex].text;
+            }
+            else
+            {
+                Debug.LogWarning($"[EndingSceneController] 結局對話索引 ({currentEndingTextIndex}) 超出總投影片頁數 ({totalLines})。結局類型: {endingType}");
+            }
+        }
+        else
+        {
+            // 沒讀到 PlayerPrefs，使用預設測試段落
+            string[] fallbackLines = new string[]
+            {
+                "這是測試結局對話的第一個對話框 (請從主場景執行以套用正式文本)",
+                "這是測試結局對話的第二個對話框",
+                "這是測試結局對話的第三個對話框"
+            };
+            if (currentEndingTextIndex < fallbackLines.Length)
+            {
+                nextLine = fallbackLines[currentEndingTextIndex];
+            }
+        }
 
         if (!string.IsNullOrEmpty(nextLine))
         {
             if (typingCoroutine != null) StopCoroutine(typingCoroutine);
             isTypingFinished = false;
             typingCoroutine = StartCoroutine(TypeTextPlay(nextLine));
-            Debug.Log($"[EndingSceneController] 透過 Signal 顯示結局文字 [{currentEndingTextIndex + 1}/3]: {nextLine}");
+            int displayCount = totalLines > 0 ? totalLines : 3;
+            Debug.Log($"[EndingSceneController] 透過 Signal 顯示結局文字 [{currentEndingTextIndex + 1}/{displayCount}] (結局類型: {endingType}): {nextLine}");
         }
         else
         {
-            Debug.LogWarning($"[EndingSceneController] 結局文字第 {currentEndingTextIndex + 1} 行為空。");
+            Debug.LogWarning($"[EndingSceneController] 結局對話段落 [{currentEndingTextIndex + 1}] 為空。結局類型: {endingType}");
             if (endingTextUI != null) endingTextUI.text = "";
         }
         currentEndingTextIndex++;
@@ -364,60 +442,30 @@ public class EndingSceneController : MonoBehaviour
 
     /// <summary>
     /// [供 Timeline Signal 呼叫] 顯示對應當前結局的圖片。
-    /// 支援雙圖片結局（成功/失敗）隨著呼叫次數推進更換圖片。
+    /// 依據 currentEndingImageIndex 從 Slides 中尋找並顯示圖片。
     /// </summary>
     public void TriggerEndingImage()
     {
-        string endingType = PlayerPrefs.GetString("EndingType", "Interesting");
-        
-        // 先隱藏所有結局圖片，準備顯示當前對應的圖片
-        if (successImage1 != null) successImage1.SetActive(false);
-        if (successImage2 != null) successImage2.SetActive(false);
-        if (failureImage1 != null) failureImage1.SetActive(false);
-        if (failureImage2 != null) failureImage2.SetActive(false);
-        if (interestingImage != null) interestingImage.SetActive(false);
-        if (escapeImage != null) escapeImage.SetActive(false);
+        string endingType = GetEndingType();
+        EndingSlide[] activeSlides = GetActiveSlides(endingType);
 
-        switch (endingType)
+        if (activeSlides != null && activeSlides.Length > 0)
         {
-            case "Success":
-                if (currentEndingImageIndex == 0)
-                {
-                    if (successImage1 != null) successImage1.SetActive(true);
-                }
-                else
-                {
-                    if (successImage2 != null) successImage2.SetActive(true);
-                    else if (successImage1 != null) successImage1.SetActive(true); // 保底
-                }
-                break;
-                
-            case "Failure":
-                if (currentEndingImageIndex == 0)
-                {
-                    if (failureImage1 != null) failureImage1.SetActive(true);
-                }
-                else
-                {
-                    if (failureImage2 != null) failureImage2.SetActive(true);
-                    else if (failureImage1 != null) failureImage1.SetActive(true); // 保底
-                }
-                break;
-                
-            case "Interesting":
-                if (interestingImage != null) interestingImage.SetActive(true);
-                break;
-                
-            case "Escape":
-                if (escapeImage != null) escapeImage.SetActive(true);
-                break;
-
-            default:
-                if (interestingImage != null) interestingImage.SetActive(true);
-                break;
+            if (currentEndingImageIndex < activeSlides.Length)
+            {
+                EndingSlide slide = activeSlides[currentEndingImageIndex];
+                DisplaySlideImage(slide, activeSlides);
+                Debug.Log($"[EndingSceneController] 透過 Signal 顯示結局圖片 (結局類型: {endingType}, 頁面索引: {currentEndingImageIndex}, Sprite: {(slide.slideSprite != null ? slide.slideSprite.name : "無")}, GameObject: {(slide.slideImageObject != null ? slide.slideImageObject.name : "無")})");
+            }
+            else
+            {
+                Debug.LogWarning($"[EndingSceneController] 結局圖片索引 ({currentEndingImageIndex}) 超出總投影片頁數 ({activeSlides.Length})。結局類型: {endingType}");
+            }
         }
-
-        Debug.Log($"[EndingSceneController] 透過 Signal 顯示結局圖片: {endingType} (圖片索引: {currentEndingImageIndex})");
+        else
+        {
+            Debug.LogWarning($"[EndingSceneController] 未在 EndingSceneController 設定對應的結局投影片 (Slides)！結局類型: {endingType}");
+        }
         currentEndingImageIndex++;
     }
 
@@ -440,6 +488,20 @@ public class EndingSceneController : MonoBehaviour
     public void ResumeEndingTimeline()
     {
         isWaitingForEndingInput = false;
+
+        string endingType = GetEndingType();
+        EndingSlide[] activeSlides = GetActiveSlides(endingType);
+        int totalLines = activeSlides != null ? activeSlides.Length : 0;
+        int maxLines = totalLines > 0 ? totalLines : 3; // 3 為預設測試行數
+
+        // 當前播放對話的索引如果已經大於等於總對話行數，代表沒有後續文本，按下去直接回到主畫面
+        if (currentEndingTextIndex >= maxLines)
+        {
+            Debug.Log("[EndingSceneController] 已無後續文本，玩家按鍵觸發回到主場景。");
+            ReturnToMainScene();
+            return;
+        }
+
         if (endingTimeline != null)
         {
             endingTimeline.Play();
@@ -464,33 +526,241 @@ public class EndingSceneController : MonoBehaviour
     /// </summary>
     public void HideEndingImage()
     {
-        if (successImage1 != null) successImage1.SetActive(false);
-        if (successImage2 != null) successImage2.SetActive(false);
-        if (failureImage1 != null) failureImage1.SetActive(false);
-        if (failureImage2 != null) failureImage2.SetActive(false);
-        if (interestingImage != null) interestingImage.SetActive(false);
-        if (escapeImage != null) escapeImage.SetActive(false);
+        // 隱藏幻燈片 GameObject
+        HideAllEndingSlideObjects();
+
+        // 隱藏幻燈片 Image 貼圖
+        if (slideImageDisplay != null)
+        {
+            slideImageDisplay.gameObject.SetActive(false);
+        }
+
         Debug.Log("[EndingSceneController] 透過 Signal 隱藏結局圖片。");
     }
 
+    // ================================================================
+    // 內部輔助方法
+    // ================================================================
+
+    private string GetEndingType()
+    {
+        string endingType = PlayerPrefs.GetString("EndingType", "Interesting");
+#if UNITY_EDITOR
+        if (debugEndingType != EndingTestType.None)
+        {
+            endingType = debugEndingType.ToString();
+        }
+#endif
+        return endingType;
+    }
+
+    private EndingSlide[] GetActiveSlides(string endingType)
+    {
+        switch (endingType)
+        {
+            case "Success": return successSlides;
+            case "Failure": return failureSlides;
+            case "Interesting": return interestingSlides;
+            case "Escape": return escapeSlides;
+            default: return interestingSlides;
+        }
+    }
+
+    private void DisplaySlideImage(EndingSlide currentSlide, EndingSlide[] allSlides)
+    {
+        // 先隱藏本結局所有投影片的 GameObject
+        if (allSlides != null)
+        {
+            foreach (var slide in allSlides)
+            {
+                if (slide != null && slide.slideImageObject != null)
+                {
+                    slide.slideImageObject.SetActive(false);
+                }
+            }
+        }
+
+        // 1. 顯示 GameObject 模式的圖片
+        if (currentSlide.slideImageObject != null)
+        {
+            currentSlide.slideImageObject.SetActive(true);
+
+            // 備用機制：如果沒有綁定單一的 slideImageDisplay，但投影片上有設定 Slide Sprite，
+            // 則自動尋找該 GameObject 上（或其子物件）的 Image 組件來更換貼圖
+            if (currentSlide.slideSprite != null && slideImageDisplay == null)
+            {
+                var imgComp = currentSlide.slideImageObject.GetComponent<UnityEngine.UI.Image>();
+                if (imgComp == null) imgComp = currentSlide.slideImageObject.GetComponentInChildren<UnityEngine.UI.Image>();
+                if (imgComp != null)
+                {
+                    imgComp.sprite = currentSlide.slideSprite;
+                    imgComp.gameObject.SetActive(true);
+                }
+            }
+        }
+
+        // 2. 顯示 Sprite 模式的圖片
+        if (currentSlide.slideSprite != null && slideImageDisplay != null)
+        {
+            slideImageDisplay.sprite = currentSlide.slideSprite;
+            slideImageDisplay.gameObject.SetActive(true);
+        }
+    }
+
+    private void HideAllEndingSlideObjects()
+    {
+        HideSlideObjects(successSlides);
+        HideSlideObjects(failureSlides);
+        HideSlideObjects(interestingSlides);
+        HideSlideObjects(escapeSlides);
+    }
+
+    private void HideSlideObjects(EndingSlide[] slides)
+    {
+        if (slides == null) return;
+        foreach (var slide in slides)
+        {
+            if (slide != null && slide.slideImageObject != null)
+            {
+                slide.slideImageObject.SetActive(false);
+            }
+        }
+    }
+
     /// <summary>
-    /// [供 Timeline Signal 呼叫] 立即載入主場景重新開始遊戲。
+    /// [供 Timeline Signal 呼叫] 開始回到主畫面轉場 (畫面漸暗、音樂漸弱)，然後載入主場景。
     /// </summary>
     public void ReturnToMainScene()
     {
-        if (endingTimeline != null)
+        StartCoroutine(ReturnToMainSceneRoutine());
+    }
+
+    private IEnumerator ReturnToMainSceneRoutine()
+    {
+        Debug.Log("[EndingSceneController] 開始回到主選單轉場 (畫面漸暗、音樂漸弱)...");
+
+        // 1. 動態建立滿版黑色遮罩 (Fade Overlay)
+        GameObject fadeOverlayObj = new GameObject("FadeToBlackOverlay");
+        Canvas canvas = FindObjectOfType<Canvas>();
+        if (canvas != null)
         {
-            endingTimeline.stopped -= OnEndingTimelineStopped; // 取消訂閱
+            fadeOverlayObj.transform.SetParent(canvas.transform, false);
         }
+        
+        Image fadeImage = fadeOverlayObj.AddComponent<Image>();
+        fadeImage.color = new Color(0f, 0f, 0f, 0f); // 初始為完全透明
+        
+        RectTransform rectTransform = fadeOverlayObj.GetComponent<RectTransform>();
+        if (rectTransform != null)
+        {
+            rectTransform.anchorMin = new Vector2(0f, 0f);
+            rectTransform.anchorMax = new Vector2(1f, 1f);
+            rectTransform.pivot = new Vector2(0.5f, 0.5f);
+            rectTransform.offsetMin = Vector2.zero;
+            rectTransform.offsetMax = Vector2.zero;
+        }
+
+        // 確保黑色遮罩位於 UI 最上層
+        fadeOverlayObj.transform.SetAsLastSibling();
+
+        // 2. 啟動背景音樂漸弱 (Fade Out) 到 0
+        float duration = 1.5f; // 漸變時間 (秒)
+        if (AudioManager.Instance != null)
+        {
+            AudioManager.Instance.FadeBGMTo(0f, duration);
+        }
+
+        // 3. 畫面漸暗 (Alpha 0 -> 1)
+        float elapsed = 0f;
+        while (elapsed < duration)
+        {
+            elapsed += Time.deltaTime;
+            float progress = Mathf.Clamp01(elapsed / duration);
+            if (fadeImage != null)
+            {
+                fadeImage.color = new Color(0f, 0f, 0f, progress);
+            }
+            yield return null;
+        }
+
+        if (fadeImage != null)
+        {
+            fadeImage.color = new Color(0f, 0f, 0f, 1f);
+        }
+
+        // 等待一小段時間讓畫面完全穩定在全黑狀態
+        yield return new WaitForSeconds(0.1f);
+
+        // 4. 載入主場景
         Debug.Log($"[EndingSceneController] 正在載入主場景 {mainSceneName} 重新開始遊戲...");
         SceneManager.LoadScene(mainSceneName);
     }
 
-    private void OnEndingTimelineStopped(PlayableDirector director)
+    private void OnEndingTimelinePlayed(PlayableDirector director)
     {
         if (director == endingTimeline)
         {
-            ReturnToMainScene();
+            // 只有當 Timeline 是從頭開始播放（時間接近 0）時，才重置索引
+            // 避免在 Pause 之後呼叫 Play (Resume) 時誤觸重置
+            if (director.time < 0.1f)
+            {
+                currentEndingTextIndex = 0;
+                currentEndingImageIndex = 0;
+                Debug.Log("[EndingSceneController] Timeline 從頭開始播放，重置投影片文字與圖片索引為 0。");
+            }
+        }
+    }
+
+    private IEnumerator PlayTypingSoundsRoutine()
+    {
+        if (_audioSource == null) yield break;
+
+        AudioClip clip = null;
+        float clipVolumeScale = 1f;
+        if (AudioManager.Instance != null)
+        {
+            clip = AudioManager.Instance.GetSFXClip(typingSoundName);
+            if (!string.IsNullOrEmpty(typingSoundName))
+            {
+                clipVolumeScale = AudioManager.Instance.GetSFXVolumeScale(typingSoundName);
+            }
+        }
+        if (clip == null) yield break;
+
+        _audioSource.clip = clip;
+        _audioSource.loop = false; // 一個一個播放
+
+        while (!isTypingFinished)
+        {
+            // 動態同步音效主音量 * 音效專屬音量比例
+            if (AudioManager.Instance != null)
+            {
+                _audioSource.volume = AudioManager.Instance.SFXVolume * clipVolumeScale;
+            }
+
+            if (!_audioSource.isPlaying)
+            {
+                _audioSource.Play();
+            }
+            yield return null;
+        }
+
+        _audioSource.Stop();
+    }
+
+    void OnDestroy()
+    {
+        if (endingTimeline != null)
+        {
+            endingTimeline.played -= OnEndingTimelinePlayed;
+        }
+        if (_soundCoroutine != null)
+        {
+            StopCoroutine(_soundCoroutine);
+        }
+        if (_audioSource != null)
+        {
+            _audioSource.Stop();
         }
     }
 }
